@@ -13,10 +13,10 @@ program embdeploy;
 
 uses
   System.SysUtils,
-  deployer in 'deployer.pas';
+  Deployer in 'Deployer.pas';
 
 const
-  VERSION = '1.0';
+  VERSION = '1.1';
 
 var
   Deployer: TDeployer;
@@ -30,7 +30,7 @@ var
   end;
 begin
   WriteLn('');
-  Writeln('Usage: embdeploy -deploy|(-cmd "command") [-platform|-profile|-config|-proot "name"] [-ignore] ProjectName');
+  Writeln('Usage: embdeploy -deploy|(-cmd "command")|(-bundle "zip") [-platform|-profile|-config|-proot "name"] [-ignore] ProjectName');
   WriteLn('');
   ShowParam('ProjectName', 'Name (relative or absolute) of the project file (.dproj)');
   ShowParam('-deploy', 'Deploy the project to the remote profile');
@@ -44,6 +44,7 @@ begin
                               'above the remote project folder. The command can contain the $PROOT parameter, which is ' +
                               'replaced with the project root folder, e.g. $PROOT/Contents/... becomes myproject.app/Contents/...');
   ShowParam('-ignore', 'Ignore errors reported by paclient.exe and continue deploying');
+  ShowParam('-bundle "zipname"', 'Produce a ZIP archive of the files to be deployed. Useful for making a ZIP of an OSX project APP bundle');
 end;
 
 // Check if the valid combination of parameters is passed
@@ -53,7 +54,7 @@ begin
   if not FileExists(Project) then
     raise Exception.Create('Project "' + Project +'" not found');
 
-  Result := FindCmdLineSwitch('deploy') or FindCmdLineSwitch('cmd');
+  Result := FindCmdLineSwitch('deploy') or FindCmdLineSwitch('cmd') or FindCmdLineSwitch('bundle');
 end;
 
 // Main application body
@@ -94,6 +95,13 @@ begin
       begin
         Deployer.ExecuteCommand(Project, Param);
         Writeln('Command executed');
+      end;
+
+      // Make a ZIP bundle of the project deployment files
+      if FindCmdLineSwitch('bundle', Param) then
+      begin
+        Deployer.BundleProject(Project, Param);
+        Writeln('ZIP bundle complete');
       end;
 
       ExitCode := 0; // Success

@@ -4,6 +4,7 @@ interface
 
 uses
   Winapi.ActiveX, Winapi.MsXML,
+  System.Zip,
   System.Sysutils, System.Classes, System.IOUtils, System.Win.Registry, Winapi.Windows;
 
 type
@@ -41,10 +42,11 @@ type
     function  CallPaclient(const aCommand: String): Boolean;
     procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
+    procedure ParseProject(const aProjectPath: String);
   public
     constructor Create;
+    procedure BundleProject(const aProjectPath, aZIPName: String);
     procedure DeployProject(const aProjectPath: String);
-    procedure ParseProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
     property Config       : String  read fConfig        write fConfig;
     property IgnoreErrors : Boolean read fIgnoreErrors  write fIgnoreErrors;
@@ -188,10 +190,37 @@ begin
   GetEmbarcaderoPaths;
 end;
 
+// Produce a ZIP archive of the files to be deployed (useful to produce archives of the OSX .APP bundles on Win)
+procedure TDeployer.BundleProject(const aProjectPath, aZIPName: String);
+var
+  Zip: TZipFile;
+  I: Integer;
+begin
+  ParseProject(aProjectPath);
+
+  WriteLn(Format('Archiving %d files from project %s, config %s', [Length(fDeployFiles), aProjectPath, fConfig]));
+
+  // Create the folders in the zip name, if any
+  ForceDirectories(ExtractFilePath(ExpandFileName(aZIPName)));
+
+  Zip := TZipFile.Create;
+  try
+    if FileExists(aZIPName) then
+      TFile.Delete(aZIPName);
+    Zip.Open(aZIPName, zmWrite);
+
+    // Add each file to the archive with its path. The \ is replaced with / to make the archive work in OSX
+    for I := 0 to Length(fDeployFiles) - 1 do
+      Zip.Add(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir.Replace('\', '/') + fDeployFiles[I].RemoteName.Replace('\', '/'));
+  finally
+    Zip.Free;
+  end;
+end;
+
 // Deploy the project to the remote server
 procedure TDeployer.DeployProject(const aProjectPath: String);
 var
-  S, TempFile:  String;
+  S, TempFile: String;
   I: Integer;
 begin
   ParseProject(aProjectPath);
@@ -326,7 +355,7 @@ begin
       // Check the Base configurations if there is a file with a Release/Debug config and use it, otherwise use the Base
       if (fDeployFiles[I].Configuration = 'Base') or fDeployFiles[I].Configuration.IsEmpty then
       begin
-        for J := I to Length(fDeployFiles) - 1 do
+        for J := 0 to Length(fDeployFiles) - 1 do
           if (fDeployFiles[I].LocalName = fDeployFiles[J].LocalName) and (fDeployFiles[J].Configuration = fConfig) then
           begin
             // There is a more detailed config found, so disable the Base
