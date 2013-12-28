@@ -11,4 +11,6 @@ Embdeploy also has to option to execute custom commands on the remote host, e.g.
 The command is executed from the folder above the remote project root. E.g. if the project is for OSX and called "myproject" it will be deployed to "<paclient profile folder>/myproject.app" and the command executed from the <paclient profile folder>.
 There is a parameter $PROOT that can be used inside commands and is replaced with the name of the project folder, which is "myproject.app" in the case above.
 
+There is also an option to produce a ZIP archive of the deployment files. It is useful for creating a ZIP of an OSX project ".app" bundle without deploying it to OSX first. This makes it easier to use an automated build script and upload the files from Windows only without switching to OSX. It can only be used on non-sandboxed applications, because the codesigning is done on OSX only.
+
 Vladimir Georgiev, 2013
