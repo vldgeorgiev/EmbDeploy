@@ -1,6 +1,8 @@
 EmbDeploy
 =========
 
+http://vldgeorgiev.wordpress.com/2014/04/29/automated-deployment-of-a-delphi-osx-project-from-the-command-line/
+
 (c) Vladimir Georgiev, 2013
 
 Automated deployer for Embarcadero RAD Studio projects.
