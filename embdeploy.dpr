@@ -20,19 +20,20 @@ const
 
 var
   Deployer: TDeployer;
-  Project, Param: String;
+  Project, Param, DelphiVer: String;
 
-  // Display the parameters usage information
-  procedure ShowUsage;
+// Display the parameters usage information
+procedure ShowUsage;
   procedure ShowParam(aParam, aText: String);
   begin
     Writeln(Format('  %-16s %s', [aParam, aText]));
   end;
 begin
   WriteLn('');
-  Writeln('Usage: embdeploy -deploy|(-cmd "command")|(-bundle "zip") [-platform|-profile|-config|-proot "name"] [-ignore] ProjectName');
+  Writeln('Usage: embdeploy [-delphiver "ver"] -deploy|(-cmd "command")|(-bundle "zip") [-platform|-profile|-config|-proot "name"] [-ignore] ProjectName');
   WriteLn('');
   ShowParam('ProjectName', 'Name (relative or absolute) of the project file (.dproj)');
+  ShowParam('-delphiver "ver"',  'Delphi version to use the paclient from. It is the number from the HKCU/Software/Emb...');
   ShowParam('-deploy', 'Deploy the project to the remote profile');
   ShowParam('-platform "name"', 'Platform to deploy (Win32, OSX32, iOSDevice, etc). If not specified the default one from ' +
                                 'the project is used');
@@ -71,7 +72,9 @@ begin
       Exit;
     end;
 
-    Deployer := TDeployer.Create;
+    if FindCmdLineSwitch('delphiver', Param) then
+      DelphiVer := Param;
+    Deployer := TDeployer.Create(DelphiVer);
     try
       if FindCmdLineSwitch('platform', Param) then
         Deployer.Platform := Param;

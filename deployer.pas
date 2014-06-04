@@ -44,7 +44,7 @@ type
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
   public
-    constructor Create;
+    constructor Create(const aDelphiVersion: String);
     procedure BundleProject(const aProjectPath, aZIPName: String);
     procedure DeployProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
@@ -156,37 +156,43 @@ var
   Reg: TRegistry;
   Versions: TStringList;
 begin
-  Versions := nil;
-  Reg := nil;
+  Reg := TRegistry.Create;
   try
-    Versions := TStringList.Create;
-    Reg := TRegistry.Create;
     Reg.RootKey := HKEY_CURRENT_USER;
-    if Reg.OpenKey('SOFTWARE\Embarcadero\BDS', false) then
+
+    // If no Delphi version is supplied try to get the latest one from the registry
+    if fDelphiVersion.IsEmpty then
     begin
-      Reg.GetKeyNames(Versions);
-      Reg.CloseKey;
-      if (Versions.Count > 0) then
-      begin
-        fDelphiVersion :=  Versions[Versions.Count - 1];
-        if Reg.OpenKey('SOFTWARE\Embarcadero\BDS\' + Versions[Versions.Count - 1], false) then
-          if Reg.ValueExists('RootDir') then
-            fDelphiPath := Reg.ReadString('RootDir');
+      Versions := TStringList.Create;
+      try
+        if Reg.OpenKey('SOFTWARE\Embarcadero\BDS', false) then
+        begin
+          Reg.GetKeyNames(Versions);
+          Reg.CloseKey;
+          if (Versions.Count > 0) then
+            fDelphiVersion := Versions[Versions.Count - 1];
+        end;
+      finally
+        Versions.Free;
       end;
     end;
+
+    if Reg.OpenKey('SOFTWARE\Embarcadero\BDS\' + fDelphiVersion, false) then
+      if Reg.ValueExists('RootDir') then
+        fDelphiPath := Reg.ReadString('RootDir');
     if fDelphiPath.IsEmpty then
       raise Exception.Create('The Delphi install path could not be found.');
 
     fPaclientPath := IncludeTrailingPathDelimiter(fDelphiPath) + 'bin\paclient.exe'
   finally
     Reg.Free;
-    Versions.Free;
   end;
 end;
 
-constructor TDeployer.Create;
+constructor TDeployer.Create(const aDelphiVersion: String);
 begin
-  inherited;
+  inherited Create;
+  fDelphiVersion := aDelphiVersion;
   GetEmbarcaderoPaths;
 end;
 
@@ -224,6 +230,7 @@ var
   I: Integer;
 begin
   ParseProject(aProjectPath);
+
   // Check if there is a remote profile and try to find one. Must be after the project is parsed
   CheckRemoteProfile;
 
@@ -363,7 +370,13 @@ begin
             Break;
           end;
       end else
-        if fDeployFiles[I].Configuration <> fConfig then
+        // Check if the file is for a different non-Base config and disable it
+        // Second check added because Delphi seems to save incorrect info for some files in the Dproj
+        // E.g. the ICNS file with class ProjectOSXResource appears only under a Release config, but not under a
+        // Sandbox config. If Sandbox is selected from the IDE and deployed, the Dproj changes and the ICNS is included
+        // in Sandbox, but sometimes excluded from Release. No pattern found
+        // The only solution is not to disable 'standard' Class files, e.g. non user added
+        if (fDeployFiles[I].Configuration <> fConfig) and (fDeployFiles[I].ClassName = 'File') then
           fDeployFiles[I].Enabled := false;
     end;
 
