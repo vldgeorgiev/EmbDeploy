@@ -16,7 +16,7 @@ uses
   Deployer in 'Deployer.pas';
 
 const
-  VERSION = '1.1';
+  VERSION = '1.3';
 
 var
   Deployer: TDeployer;

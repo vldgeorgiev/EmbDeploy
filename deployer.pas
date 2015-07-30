@@ -324,6 +324,11 @@ begin
       if Nodes.item[I].selectSingleNode('Extensions/node()') <> nil then
         fDeployClasses[Count].Extensions := Nodes.item[I].selectSingleNode('Extensions/node()').nodeValue;
 
+      // VG 300715: The XE8 sets the ProjectOSXEntitlements RemoteFolder incorrectly to "../" instead of "Contents"
+      // Hardcode a quick fix for it and watch for other such problems
+      if fDeployClasses[Count].Name.Equals('ProjectOSXEntitlements') and fDeployClasses[Count].RemoteDir.Equals('../') then
+        fDeployClasses[Count].RemoteDir := 'Contents';
+
       Inc(Count);
     end;
     SetLength(fDeployClasses, Count);
