@@ -326,7 +326,14 @@ begin
 
       // VG 300715: The XE8 sets the ProjectOSXEntitlements RemoteFolder incorrectly to "../" instead of "Contents"
       // Hardcode a quick fix for it and watch for other such problems
-      if fDeployClasses[Count].Name.Equals('ProjectOSXEntitlements') and fDeployClasses[Count].RemoteDir.Equals('../') then
+      //
+      //Not sure how XE10, 10.1 (Seatlle) deal with this but in D10.1 Berlin the folder is set to "..\" and not to "../"
+      {$IFDEF VER310}
+        entitlementPath:='..\';
+      {$ELSE}
+        entitlementPath:='../';
+      {$ENDIF}
+      if fDeployClasses[Count].Name.Equals('ProjectOSXEntitlements') and fDeployClasses[Count].RemoteDir.Equals(entitlementPath) then
         fDeployClasses[Count].RemoteDir := 'Contents';
 
       Inc(Count);
