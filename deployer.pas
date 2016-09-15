@@ -26,6 +26,38 @@ type
     Configuration: String;    // Release/Debug/Base/Others...
   end;
 
+  TEntitlementsRecord= record
+    ReadOnlyMusic: Boolean; //<EL_ReadOnlyMusic>
+    ///// The IDE doesn't create key for this entry
+    ///// <EL_ReadWriteMusic>
+    ReadWriteMusic: Boolean;
+    ////
+
+    ReadOnlyPictures: Boolean; //<EL_ReadOnlyPictures>
+    ////// There is a bug in the creation of the file by the IDE
+    ReadWritePictures: Boolean; //<EL_ReadWritePictures>
+    /////  The key com.apple.security.assets.pictures.read-only is
+    /////  generated twice.
+    ///// The com.apple.security.assets.pictures.read-write is missing
+
+    IncomingNetwork: Boolean; //<EL_IncomingNetwork>
+    OutgoingNetwork: Boolean; //<EL_OutgoingNetwork>
+    Location: Boolean; //<EL_Location>true
+    USBDevice: Boolean; //<EL_USBDevices>
+    ReadWriteCalendars: Boolean; //<EL_ReadWriteCalendars>
+    ReadWriteFileDialog: Boolean; //<EL_ReadWriteFileDialog>
+    ReadOnlyFileDialog: Boolean; //<EL_ReadOnlyFileDialog>
+    ReadWriteDownloads: Boolean; //<EL_ReadWriteDownloads>
+    ReadWriteMovies: Boolean; //<EL_ReadWriteMovies>
+    ReadOnlyMovies: Boolean; //<EL_ReadOnlyMovies>
+    RecordingMicrophone: Boolean; //<EL_RecordingMicrophone>
+
+    Printing: Boolean; //<EL_Printing>
+    CaptureCamera: Boolean; //<EL_CaptureCamera>
+    ReadWriteAddressBook: Boolean; //<EL_ReadWriteAddressBook>
+    ChildProcessInheritance: Boolean; //<EL_ChildProcessInheritance>
+  end;
+
   TDeployer = class
   private
     fDelphiPath   : String;
@@ -39,10 +71,13 @@ type
     fDeployFiles  : array of TDeployFile;
     fIgnoreErrors : Boolean;
     fPaclientPath : String;
+    fEntitlements: TEntitlementsRecord;
     function  CallPaclient(const aCommand: String): Boolean;
     procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
+    procedure CreateDeploymentFile(const fullPath: string);
+    procedure CreateEntitlementsFile(const fullPath: string);
   public
     constructor Create(const aDelphiVersion: String);
     procedure BundleProject(const aProjectPath, aZIPName: String);
@@ -54,6 +89,7 @@ type
     property ProjectRoot  : String  read fProjectRoot   write fProjectRoot;
     property RemoteProfile: String  read fRemoteProfile write fRemoteProfile;
   end;
+
 
 implementation
 
@@ -196,6 +232,91 @@ begin
   GetEmbarcaderoPaths;
 end;
 
+// Creates files required for the deployment package
+// Currently it creates the .entitlements and .info.plist files for OSX32
+procedure TDeployer.CreateDeploymentFile(const fullPath: string);
+var
+  ext: string;
+begin
+  ext:=ExtractFileExt(fullPath);
+  if ext='.entitlements' then
+    CreateEntitlementsFile(fullPath);
+end;
+
+begin
+  ext:=ExtractFileExt(fullPath);
+  if (ext='.entitlements') and (fPlatform='OSX32') then
+    CreateEntitlementsFile(fullPath);
+end;
+
+procedure TDeployer.CreateEntitlementsFile(const fullPath: string);
+
+  function BooleanToString(const value: boolean): string;
+  begin
+    if value then
+      result:='true'
+    else
+      result:='false';
+  end;
+
+var
+  xmlFile: TStringList;
+begin
+  xmlFile:=TStringList.Create;
+  try
+    xmlFile.Add('<?xml version="1.0" encoding="UTF-8"?>');
+    xmlFile.Add('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">');
+    xmlFile.Add('<plist version="1.0">');
+    xmlFile.Add('<dict>');
+
+    xmlFile.Add('   <key>com.apple.security.assets.music.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyMusic)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.music.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteMusic)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.pictures.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyPictures)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.pictures.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWritePictures)+'/>');
+    xmlFile.Add('   <key>com.apple.security.network.client</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.IncomingNetwork)+'/>');
+    xmlFile.Add('   <key>com.apple.security.network.server</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.OutgoingNetwork)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.location</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.Location)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.usb</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.USBDevice)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.calendars</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteCalendars)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.user-selected.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteFileDialog)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.user-selected.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyFileDialog)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.downloads.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteDownloads)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.movies.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteMovies)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.movies.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyMovies)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.microphone</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.RecordingMicrophone)+'/>');
+    xmlFile.Add('   <key>com.apple.security.print</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.Printing)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.camera</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.CaptureCamera)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.addressbook</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteAddressBook)+'/>');
+    xmlFile.Add('   <key>com.apple.security.inherit</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ChildProcessInheritance)+'/>');
+
+    XmlFile.Add('</dict>');
+    xmlFile.Add('</plist>');
+
+    xmlFile.SaveToFile(fullPath);
+  finally
+    xmlFile.Free;
+  end;
+end;
+
 // Produce a ZIP archive of the files to be deployed (useful to produce archives of the OSX .APP bundles on Win)
 procedure TDeployer.BundleProject(const aProjectPath, aZIPName: String);
 var
@@ -251,6 +372,10 @@ begin
   for I := 0 to Length(fDeployFiles) - 1 do
   begin
     Writeln('Deploying file: ' + fDeployFiles[I].LocalName);
+
+    if not TFile.Exists(fDeployFiles[I].LocalName) then
+      CreateDeploymentFile(fDeployFiles[I].LocalName);
+
     if not CallPaclient(Format(PACLIENT_PUT, [fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
                                               fDeployFiles[I].Operation, fDeployFiles[I].RemoteName])) and not fIgnoreErrors then
       raise Exception.Create('Paclient error. Deployment stopped.');
@@ -264,6 +389,7 @@ var
   Node  : IXMLDOMNode;
   Nodes : IXMLDOMNodeList;
   I, J, Count : Integer;
+  entitlementPath: string;
 begin
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
@@ -302,6 +428,128 @@ begin
         raise Exception.Create('ProjectRoot not found in the project.');
       fProjectRoot := Node.attributes.getNamedItem('Name').nodeValue;
       fProjectRoot := fProjectRoot.Replace('$(PROJECTNAME)', fProjectName);
+    end;
+
+    //Get the .plist details for OSX
+    if fPlatform='OSX32' then
+    begin
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyMusic/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyMusic := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyMusic:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteMusic/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteMusic := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteMusic:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyPictures/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyPictures := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyPictures:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWritePictures/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWritePictures := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWritePictures:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_IncomingNetwork/node()');
+      if Assigned(Node) then
+        fEntitlements.IncomingNetwork := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.IncomingNetwork:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_OutgoingNetwork/node()');
+      if Assigned(Node) then
+        fEntitlements.OutgoingNetwork := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.OutgoingNetwork:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_Location/node()');
+      if Assigned(Node) then
+        fEntitlements.Location := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.Location:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_USBDevices/node()');
+      if Assigned(Node) then
+        fEntitlements.USBDevice := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.USBDevice:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteCalendars/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteCalendars := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteCalendars:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteFileDialog/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteFileDialog := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteFileDialog:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyFileDialog/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyFileDialog := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyFileDialog:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteDownloads/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteDownloads := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteDownloads:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteMovies/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteMovies := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteMovies:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyMovies/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyMovies := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyMovies:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_RecordingMicrophone/node()');
+      if Assigned(Node) then
+        fEntitlements.RecordingMicrophone := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.RecordingMicrophone:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_Printing/node()');
+      if Assigned(Node) then
+        fEntitlements.Printing := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.Printing:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_CaptureCamera/node()');
+      if Assigned(Node) then
+        fEntitlements.CaptureCamera := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.CaptureCamera:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteAddressBook/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteAddressBook := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteAddressBook:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ChildProcessInheritance/node()');
+      if Assigned(Node) then
+        fEntitlements.ChildProcessInheritance := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ChildProcessInheritance:=False;
+
+    Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/VerInfo_Keys/node()');
+    if Assigned(Node) then
+      verInfoStr := Node.nodeValue;
     end;
 
     // Get all the Platform subnodes of the DeployClass nodes for the specified platform
