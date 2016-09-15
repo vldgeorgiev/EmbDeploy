@@ -5,7 +5,8 @@ interface
 uses
   Winapi.ActiveX, Winapi.MsXML,
   System.Zip,
-  System.Sysutils, System.Classes, System.IOUtils, System.Win.Registry, Winapi.Windows;
+  System.Sysutils, System.Classes, System.IOUtils, System.Win.Registry, Winapi.Windows,
+  DeployChannels, System.Generics.Collections;
 
 type
   TDeployClass = record
@@ -74,6 +75,7 @@ type
     fEntitlements: TEntitlementsRecord;
     fVerInfoKeys: string;
     fVerbose: Boolean;
+    fDeployChannels: TList<IDeployChannel>;
     function  CallPaclient(const aCommand: String): Boolean;
     procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
@@ -83,6 +85,7 @@ type
     procedure CreateInfoPlistFile(const fullPath: string);
   public
     constructor Create(const aDelphiVersion: String);
+    destructor Destroy; override;
     procedure BundleProject(const aProjectPath, aZIPName: String);
     procedure DeployProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
@@ -246,6 +249,7 @@ end;
 constructor TDeployer.Create(const aDelphiVersion: String);
 begin
   inherited Create;
+  fDeployChannels:=TList<IDeployChannel>.Create;
   fDelphiVersion := aDelphiVersion;
   GetEmbarcaderoPaths;
 end;
@@ -435,6 +439,13 @@ begin
                                               fDeployFiles[I].Operation, fDeployFiles[I].RemoteName])) and not fIgnoreErrors then
       raise Exception.Create('Paclient error. Deployment stopped.');
   end;
+end;
+
+destructor TDeployer.Destroy;
+var
+begin
+  fDeployChannels.Free;
+  inherited;
 end;
 
 // Parse the project file to find the list of files to be deployed
