@@ -46,6 +46,7 @@ begin
                               'replaced with the project root folder, e.g. $PROOT/Contents/... becomes myproject.app/Contents/...');
   ShowParam('-ignore', 'Ignore errors reported by paclient.exe and continue deploying');
   ShowParam('-bundle "zipname"', 'Produce a ZIP archive of the files to be deployed. Useful for making a ZIP of an OSX project APP bundle');
+  ShowParam('-verbose', 'Produces detailed debugging messages');
 end;
 
 // Check if the valid combination of parameters is passed
@@ -85,6 +86,8 @@ begin
       if FindCmdLineSwitch('proot', Param) then
         Deployer.ProjectRoot := Param;
       Deployer.IgnoreErrors := FindCmdLineSwitch('ignore');
+
+      Deployer.Verbose:=FindCmdLineSwitch('verbose');
 
       // Deploy the project
       if FindCmdLineSwitch('deploy') then
