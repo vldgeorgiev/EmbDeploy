@@ -73,6 +73,7 @@ type
     fPaclientPath : String;
     fEntitlements: TEntitlementsRecord;
     fVerInfoKeys: string;
+    fVerbose: Boolean;
     function  CallPaclient(const aCommand: String): Boolean;
     procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
@@ -90,6 +91,7 @@ type
     property Platform     : String  read fPlatform      write fPlatform;
     property ProjectRoot  : String  read fProjectRoot   write fProjectRoot;
     property RemoteProfile: String  read fRemoteProfile write fRemoteProfile;
+    property Verbose: boolean read fVerbose write fVerbose;
   end;
 
 
@@ -136,6 +138,11 @@ begin
     StartInfo.hStdError   := PipeWrite;
     StartInfo.dwFlags     := STARTF_USESTDHANDLES;  // use output redirect pipe
 
+    fullProcessPath:='"'+fPaclientPath+'"' + ' ' + aCommand + ' "' + fRemoteProfile+'"';
+    if fVerbose then
+      Writeln('Full Command Line: '+fullProcessPath);
+
+    if CreateProcess(nil, PChar(fullProcessPath), nil, nil, true,
                           CREATE_NO_WINDOW, nil, nil, StartInfo, ProcInfo) then
       try
         WaitForSingleObject(ProcInfo.hProcess, Infinite);
@@ -174,13 +181,17 @@ end;
 procedure TDeployer.CheckRemoteProfile;
 var
   Reg: TRegistry;
+  regKey: string;
 begin
   if fRemoteProfile.IsEmpty then
   begin
     Reg := TRegistry.Create;
     try
       Reg.RootKey := HKEY_CURRENT_USER;
-      if Reg.OpenKey('Software\Embarcadero\BDS\' + fDelphiVersion + '\RemoteProfiles', false) then
+      regKey:='Software\Embarcadero\BDS\' + fDelphiVersion + '\RemoteProfiles';
+      if fVerbose then
+        Writeln('Looking at Registry Key: '+regKey);
+      if Reg.OpenKey(regKey, false) then
         if Reg.ValueExists('Default_' + fPlatform) then
           fRemoteProfile := Reg.ReadString('Default_' + fPlatform);
 
