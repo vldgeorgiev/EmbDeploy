@@ -72,12 +72,14 @@ type
     fIgnoreErrors : Boolean;
     fPaclientPath : String;
     fEntitlements: TEntitlementsRecord;
+    fVerInfoKeys: string;
     function  CallPaclient(const aCommand: String): Boolean;
     procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
     procedure CreateDeploymentFile(const fullPath: string);
     procedure CreateEntitlementsFile(const fullPath: string);
+    procedure CreateInfoPlistFile(const fullPath: string);
   public
     constructor Create(const aDelphiVersion: String);
     procedure BundleProject(const aProjectPath, aZIPName: String);
@@ -92,6 +94,9 @@ type
 
 
 implementation
+
+uses
+	System.StrUtils;
 
 const
   // Paclient commands and the parameters to be substituted
@@ -112,6 +117,7 @@ var
   ProcInfo           : TProcessInformation;
   I                  : Integer;
   ExCode             : Cardinal;
+  fullProcessPath    : string;
 begin
   Result := false;
 
@@ -130,7 +136,6 @@ begin
     StartInfo.hStdError   := PipeWrite;
     StartInfo.dwFlags     := STARTF_USESTDHANDLES;  // use output redirect pipe
 
-    if CreateProcess(nil, PChar(fPaclientPath + ' ' + aCommand + ' ' + fRemoteProfile), nil, nil, true,
                           CREATE_NO_WINDOW, nil, nil, StartInfo, ProcInfo) then
       try
         WaitForSingleObject(ProcInfo.hProcess, Infinite);
@@ -141,7 +146,7 @@ begin
         // Parse the output, delete the first 4 lines, that are not very useful, and display the rest indented
         Output := TStringList.Create;
         try
-          Output.Text := String(Buffer);
+          Output.Text:=String(Buffer);
           Output.Delete(0); Output.Delete(0); Output.Delete(0); Output.Delete(0);
           for I := 0 to Output.Count - 1 do
             WriteLn('  ' + Output[I]);
@@ -157,7 +162,9 @@ begin
       end;
   finally
     CloseHandle(PipeRead);
-    {$IFNDEF  DEBUG}  // The PipeWrite handle is closed twice, which is acceptable in Release, but raises exceptions when running with the debugger
+    {$IFNDEF  DEBUG}  // The PipeWrite handle is closed twice,
+                      //which is acceptable in Release,
+                      //but raises exceptions when running with the debugger
     CloseHandle(PipeWrite);
     {$ENDIF}
   end;
@@ -239,14 +246,10 @@ var
   ext: string;
 begin
   ext:=ExtractFileExt(fullPath);
-  if ext='.entitlements' then
-    CreateEntitlementsFile(fullPath);
-end;
-
-begin
-  ext:=ExtractFileExt(fullPath);
   if (ext='.entitlements') and (fPlatform='OSX32') then
     CreateEntitlementsFile(fullPath);
+  if (ext='.plist') and (fPlatform='OSX32') then
+    CreateInfoPlistFile(fullPath);
 end;
 
 procedure TDeployer.CreateEntitlementsFile(const fullPath: string);
@@ -307,6 +310,47 @@ begin
     xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteAddressBook)+'/>');
     xmlFile.Add('   <key>com.apple.security.inherit</key>');
     xmlFile.Add('   <'+BooleanToString(fEntitlements.ChildProcessInheritance)+'/>');
+
+    XmlFile.Add('</dict>');
+    xmlFile.Add('</plist>');
+
+    xmlFile.SaveToFile(fullPath);
+  finally
+    xmlFile.Free;
+  end;
+end;
+
+procedure TDeployer.CreateInfoPlistFile(const fullPath: string);
+var
+  xmlFile,
+  verKeys: TStringList;
+  i: Integer;
+begin
+  xmlFile:=TStringList.Create;
+  try
+    xmlFile.Add('<?xml version="1.0" encoding="UTF-8"?>');
+    xmlFile.Add('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">');
+    xmlFile.Add('<plist version="1.0">');
+    xmlFile.Add('<dict>');
+
+    verKeys:=TStringList.Create;
+    try
+      verKeys.Delimiter:=';';
+      verKeys.StrictDelimiter:=true;
+      verKeys.DelimitedText:=fVerInfoKeys;
+
+      for i := 0 to verKeys.Count-1 do
+      begin
+        xmlFile.Add('   <key>'+verKeys[i].Split(['='])[0]+'</key>');
+        xmlFile.Add('   <string>'+verKeys[i].Split(['='])[1]+'</string>');
+      end;
+
+      xmlFile.Add('   <key>CFBundleIconFile</key>');
+      xmlFile.Add('   <string>'+fProjectName+'.icns</string>');
+
+    finally
+      verKeys.Free;
+    end;
 
     XmlFile.Add('</dict>');
     xmlFile.Add('</plist>');
@@ -430,7 +474,7 @@ begin
       fProjectRoot := fProjectRoot.Replace('$(PROJECTNAME)', fProjectName);
     end;
 
-    //Get the .plist details for OSX
+    //Get the .entitlements details for OSX
     if fPlatform='OSX32' then
     begin
       Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyMusic/node()');
@@ -547,9 +591,13 @@ begin
       else
         fEntitlements.ChildProcessInheritance:=False;
 
-    Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/VerInfo_Keys/node()');
-    if Assigned(Node) then
-      verInfoStr := Node.nodeValue;
+    //Get the .plist details for OSX
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/VerInfo_Keys/node()');
+      if Assigned(Node) then
+      begin
+        fVerInfoKeys := Node.nodeValue;
+        fVerInfoKeys:=ReplaceStr(fVerInfoKeys,'$(MSBuildProjectName)',fProjectName);
+      end;
     end;
 
     // Get all the Platform subnodes of the DeployClass nodes for the specified platform
