@@ -353,6 +353,9 @@ begin
         raise Exception.Create('Paclient error. Deployment stopped.');
     end;
   end;
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.CloseChannel;
 end;
 
 destructor TDeployer.Destroy;
