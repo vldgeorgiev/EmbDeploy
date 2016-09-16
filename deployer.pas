@@ -76,19 +76,21 @@ type
     fVerInfoKeys: string;
     fVerbose: Boolean;
     fDeployChannels: TList<IDeployChannel>;
-    function  CallPaclient(const aCommand: String): Boolean;
-    procedure CheckRemoteProfile;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
     procedure CreateDeploymentFile(const fullPath: string);
     procedure CreateEntitlementsFile(const fullPath: string);
     procedure CreateInfoPlistFile(const fullPath: string);
+    procedure SetupChannels;
   public
     constructor Create(const aDelphiVersion: String);
     destructor Destroy; override;
     procedure BundleProject(const aProjectPath, aZIPName: String);
     procedure DeployProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
+    procedure RegisterPACLient;
+    procedure RegisterFolder(const regPath: string);
+
     property Config       : String  read fConfig        write fConfig;
     property IgnoreErrors : Boolean read fIgnoreErrors  write fIgnoreErrors;
     property Platform     : String  read fPlatform      write fPlatform;
@@ -102,110 +104,6 @@ implementation
 
 uses
 	System.StrUtils;
-
-const
-  // Paclient commands and the parameters to be substituted
-  PACLIENT_CLEAN = '--Clean="%s,%s"';     //0 - project root name, 1 - path to a temp file with containing a list of files
-  PACLIENT_PUT   = '--put="%s,%s,%d,%s"'; //0 - local name, 1 - remote path, 2 - operation, 3 - remote name
-
-
-// Execute the PaClient.exe app and pass it the command and profile
-// Filter some of the paclient output by capturing the out and err pipes
-function TDeployer.CallPaclient(const aCommand: String): Boolean;
-var
-  Security           : TSecurityAttributes;
-  PipeRead, PipeWrite: THandle;
-  BytesInPipe        : Cardinal;
-  Buffer             : array[0..2000] of AnsiChar;
-  Output             : TStringList;
-  StartInfo          : TStartupInfo;
-  ProcInfo           : TProcessInformation;
-  I                  : Integer;
-  ExCode             : Cardinal;
-  fullProcessPath    : string;
-begin
-  Result := false;
-
-  // Create a pipe to capture the output
-  Security.nLength              := SizeOf(TSecurityAttributes);
-  Security.bInheritHandle       := true;
-  Security.lpSecurityDescriptor := nil;
-  if not CreatePipe(PipeRead, PipeWrite, @Security, 0) then
-    RaiseLastOSError;
-
-  try
-    ZeroMemory(@StartInfo, SizeOf(StartInfo));
-    ZeroMemory(@ProcInfo, SizeOf(ProcInfo));
-    StartInfo.cb          := SizeOf(StartInfo);
-    StartInfo.hStdOutput  := PipeWrite;
-    StartInfo.hStdError   := PipeWrite;
-    StartInfo.dwFlags     := STARTF_USESTDHANDLES;  // use output redirect pipe
-
-    fullProcessPath:='"'+fPaclientPath+'"' + ' ' + aCommand + ' "' + fRemoteProfile+'"';
-    if fVerbose then
-      Writeln('Full Command Line: '+fullProcessPath);
-
-    if CreateProcess(nil, PChar(fullProcessPath), nil, nil, true,
-                          CREATE_NO_WINDOW, nil, nil, StartInfo, ProcInfo) then
-      try
-        WaitForSingleObject(ProcInfo.hProcess, Infinite);
-        // The process has finished, so close the write pipe and read the output
-        CloseHandle(PipeWrite);
-        ZeroMemory(@Buffer, Length(Buffer));
-        ReadFile(PipeRead, Buffer[0], Length(Buffer), BytesInPipe, nil);
-        // Parse the output, delete the first 4 lines, that are not very useful, and display the rest indented
-        Output := TStringList.Create;
-        try
-          Output.Text:=String(Buffer);
-          Output.Delete(0); Output.Delete(0); Output.Delete(0); Output.Delete(0);
-          for I := 0 to Output.Count - 1 do
-            WriteLn('  ' + Output[I]);
-        finally
-          Output.Free;
-        end;
-
-        // Check the exit code of paclient.exe / 0 is success
-        Result := GetExitCodeProcess(ProcInfo.hProcess, ExCode) and (ExCode = 0);
-      finally
-        CloseHandle(ProcInfo.hProcess);
-        CloseHandle(ProcInfo.hThread);
-      end;
-  finally
-    CloseHandle(PipeRead);
-    {$IFNDEF  DEBUG}  // The PipeWrite handle is closed twice,
-                      //which is acceptable in Release,
-                      //but raises exceptions when running with the debugger
-    CloseHandle(PipeWrite);
-    {$ENDIF}
-  end;
-end;
-
-// Check if there is a remote profile assigned, or try to find the default one for the platform
-procedure TDeployer.CheckRemoteProfile;
-var
-  Reg: TRegistry;
-  regKey: string;
-begin
-  if fRemoteProfile.IsEmpty then
-  begin
-    Reg := TRegistry.Create;
-    try
-      Reg.RootKey := HKEY_CURRENT_USER;
-      regKey:='Software\Embarcadero\BDS\' + fDelphiVersion + '\RemoteProfiles';
-      if fVerbose then
-        Writeln('Looking at Registry Key: '+regKey);
-      if Reg.OpenKey(regKey, false) then
-        if Reg.ValueExists('Default_' + fPlatform) then
-          fRemoteProfile := Reg.ReadString('Default_' + fPlatform);
-
-      if fRemoteProfile.IsEmpty then
-        raise Exception.Create('Default remote profile not found. Please specify a profile.');
-      Writeln('Using default profile: ' + fRemoteProfile);
-    finally
-      Reg.Free;
-    end;
-  end;
-end;
 
 // Try to find the last version of Delphi installed to get the Redist folder and Paclient path
 procedure TDeployer.GetEmbarcaderoPaths;
@@ -408,11 +306,11 @@ procedure TDeployer.DeployProject(const aProjectPath: String);
 var
   S, TempFile: String;
   I: Integer;
+  tmpChannel: IDeployChannel;
 begin
   ParseProject(aProjectPath);
 
-  // Check if there is a remote profile and try to find one. Must be after the project is parsed
-  CheckRemoteProfile;
+  SetupChannels;
 
   WriteLn(Format('Deploying %d files from project %s, config %s', [Length(fDeployFiles), aProjectPath, fConfig]));
 
@@ -421,11 +319,24 @@ begin
   for I := 0 to Length(fDeployFiles) - 1 do
     S := S + fDeployFiles[I].RemoteDir + fDeployFiles[I].RemoteName + sLineBreak;
   TFile.WriteAllText(TempFile, S);
+
+  if fVerbose then
+    Writeln('TempFile: '+TempFile);
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.FileListName:=TempFile;
+
+  //Clean up deploy channels
   // Execute the clean command and delete the temp file
   Writeln('Cleaning remote project folder');
-  if not CallPaclient(Format(PACLIENT_CLEAN, [fProjectRoot, TempFile])) and not fIgnoreErrors then
-    raise Exception.Create('Paclient error. Deployment stopped.');
+
+  for tmpChannel in fDeployChannels do
+  begin
+    if (not tmpChannel.CleanChannel) and (not fIgnoreErrors) then
+      raise Exception.Create('Error. Deployment stopped.');
+  end;
   TFile.Delete(TempFile);
+
 
   // Deploy the files
   for I := 0 to Length(fDeployFiles) - 1 do
@@ -435,14 +346,16 @@ begin
     if not TFile.Exists(fDeployFiles[I].LocalName) then
       CreateDeploymentFile(fDeployFiles[I].LocalName);
 
-    if not CallPaclient(Format(PACLIENT_PUT, [fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
-                                              fDeployFiles[I].Operation, fDeployFiles[I].RemoteName])) and not fIgnoreErrors then
-      raise Exception.Create('Paclient error. Deployment stopped.');
+    for tmpChannel in fDeployChannels do
+    begin
+      if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
+              fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
+        raise Exception.Create('Paclient error. Deployment stopped.');
+    end;
   end;
 end;
 
 destructor TDeployer.Destroy;
-var
 begin
   fDeployChannels.Free;
   inherited;
@@ -751,16 +664,46 @@ begin
   end;
 end;
 
+procedure TDeployer.RegisterFolder(const regPath: string);
+var
+  newFolderChannel: IDeployChannel;
+begin
+  newFolderChannel:=TFolderChannel.Create(Trim(regPath));
+  newFolderChannel.Verbose:=fVerbose;
+  newFolderChannel.ProjectRoot:=fProjectRoot;
+  fDeployChannels.Add(newFolderChannel);
+end;
+
+procedure TDeployer.RegisterPACLient;
+var
+  newPAClientChannel: IDeployChannel;
+begin
+  newPAClientChannel:=TPAClientChannel.Create(fRemoteProfile, fPaclientPath,
+                                                fDelphiVersion, fPlatform);
+  newPAClientChannel.Verbose:=fVerbose;
+  newPAClientChannel.ProjectRoot:=fProjectRoot;
+  fDeployChannels.Add(newPAClientChannel);
+end;
+
+procedure TDeployer.SetupChannels;
+var
+  tmpChannel: IDeployChannel;
+begin
+  for tmpChannel in fDeployChannels do
+    tmpChannel.SetupChannel;
+end;
+
 // Execute a custom command on the remote server
 // This is done by creating a temporary file with the command and executing it in the shell
 procedure TDeployer.ExecuteCommand(const aProjectPath, aCommand: String);
 var
   Text, Cmd, TempFile:  String;
+  tmpChannel: IDeployChannel;
 begin
   ParseProject(aProjectPath);
 
   // Check if there is a remote profile and try to find one. Must be after the project is parsed
-  CheckRemoteProfile;
+  SetupChannels;
 
   // Replace any custom parameters in the command
   Cmd := aCommand.Replace('$PROOT', fProjectRoot, [rfReplaceAll]);
@@ -778,8 +721,17 @@ begin
   // Deploy the file and execute it with the 5 operation
   // The file is deployed to the root deployment folder (the one above the project root folder) and executed there
   Writeln('Executing custom command: ' + aCommand);
-  if not CallPaclient(Format(PACLIENT_PUT, [TempFile, '.', 5, ''])) and not fIgnoreErrors then
-    raise Exception.Create('Command error.');
+
+//  for tmpChannel in fDeployChannels do
+//  begin
+//    if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
+//            fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
+//      raise Exception.Create('Paclient error. Deployment stopped.');
+//  end;
+//
+//
+//  if not CallPaclient(Format(PACLIENT_PUT, [TempFile, '.', 5, ''])) and not fIgnoreErrors then
+// //   raise Exception.Create('Command error.');
   TFile.Delete(TempFile);
 end;
 
