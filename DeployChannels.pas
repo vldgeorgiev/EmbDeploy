@@ -52,7 +52,7 @@ type
     fPAClientPath,
     fDelphiVersion,
     fPlatfrom: string;
-    function CallPAClient(aCommand: string): Boolean;
+    function CallPAClient(const aCommand: string): Boolean;
   public
     constructor Create (const newRemoteProfile: string; const newPAClientPAth: string;
                         const newDelphiVersion: string; const newPlatform: string);
@@ -92,7 +92,7 @@ const
 
 // Execute the PaClient.exe app and pass it the command and profile
 // Filter some of the paclient output by capturing the out and err pipes
-function TPAClientChannel.CallPAClient(aCommand: string): Boolean;
+function TPAClientChannel.CallPAClient(const aCommand: string): Boolean;
 var
   Security           : TSecurityAttributes;
   PipeRead, PipeWrite: THandle;
@@ -219,7 +219,6 @@ end;
 { TFolderChannel }
 
 function TFolderChannel.CleanChannel:boolean;
-
 begin
   Result:=true;
 end;
@@ -232,6 +231,7 @@ end;
 constructor TFolderChannel.Create(const newFolder: string; const ProjectName: string;
                                       const BaseProjectName: string);
 begin
+  inherited Create;
   fFolder:=newFolder;
   fProjectName:=ProjectName;
   fBaseProjectName:=BaseProjectName;
