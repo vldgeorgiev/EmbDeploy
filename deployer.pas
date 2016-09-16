@@ -731,17 +731,18 @@ begin
   // The file is deployed to the root deployment folder (the one above the project root folder) and executed there
   Writeln('Executing custom command: ' + aCommand);
 
-//  for tmpChannel in fDeployChannels do
-//  begin
-//    if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
-//            fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
-//      raise Exception.Create('Paclient error. Deployment stopped.');
-//  end;
-//
-//
-//  if not CallPaclient(Format(PACLIENT_PUT, [TempFile, '.', 5, ''])) and not fIgnoreErrors then
-// //   raise Exception.Create('Command error.');
+  for tmpChannel in fDeployChannels do
+  begin
+    if tmpChannel is TPAClientChannel then
+      if (not tmpChannel.DeployFile(TempFile,'.',5,'')) and (not fIgnoreErrors) then
+        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Command Error.');
+  end;
+
   TFile.Delete(TempFile);
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.CloseChannel;
+
 end;
 
 end.
