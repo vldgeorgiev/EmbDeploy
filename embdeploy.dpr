@@ -47,6 +47,9 @@ begin
   ShowParam('-ignore', 'Ignore errors reported by paclient.exe and continue deploying');
   ShowParam('-bundle "zipname"', 'Produce a ZIP archive of the files to be deployed. Useful for making a ZIP of an OSX project APP bundle');
   ShowParam('-verbose', 'Produces detailed debugging messages');
+  ShowParam('-registerPAClient','Uses the PAClient to deploy the project');
+  ShowParam('-registerFolder "folder"', 'OSX only: Creates the APP folder structure on Windows.'+
+                                      ' Useful for building OSX without the need to use the paclient on OSX');
 end;
 
 // Check if the valid combination of parameters is passed
