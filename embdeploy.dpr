@@ -89,6 +89,11 @@ begin
 
       Deployer.Verbose:=FindCmdLineSwitch('verbose');
 
+      if FindCmdLineSwitch('registerPAClient') then
+        Deployer.RegisterPACLient;
+      if FindCmdLineSwitch('registerFolder', Param) then
+        Deployer.RegisterFolder(Param, TPath.GetFileNameWithoutExtension(Project));
+
       // Deploy the project
       if FindCmdLineSwitch('deploy') then
       begin
