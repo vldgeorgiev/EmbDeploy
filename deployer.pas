@@ -72,11 +72,12 @@ type
     fDeployFiles  : array of TDeployFile;
     fIgnoreErrors : Boolean;
     fPaclientPath : String;
-    fEntitlements: TEntitlementsRecord;
-    fVerInfoKeys: string;
-    fVerbose: Boolean;
+    fEntitlements : TEntitlementsRecord;
+    fVerInfoKeys  : string;
+    fVerbose      : Boolean;
     fDeployChannels: TList<IDeployChannel>;
-    fBinaryFolder: string;
+    fBinaryFolder : string;
+    fLogExceptions: Boolean;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
     procedure CreateDeploymentFile(const fullPath: string);
@@ -99,6 +100,7 @@ type
     property RemoteProfile: String  read fRemoteProfile write fRemoteProfile;
     property Verbose      : boolean read fVerbose       write fVerbose;
     property BinaryFolder : string  read fBinaryFolder  write fBinaryFolder;
+    property LogExceptions: Boolean read fLogExceptions write fLogExceptions;
   end;
 
 
@@ -138,6 +140,12 @@ begin
       if Reg.ValueExists('RootDir') then
         fDelphiPath := Reg.ReadString('RootDir');
     if fDelphiPath.IsEmpty then
+    if fLogExceptions then
+    begin
+      Writeln('The Delphi install path could not be found.');
+      Halt(1);
+    end
+    else
       raise Exception.Create('The Delphi install path could not be found.');
 
     fPaclientPath := IncludeTrailingPathDelimiter(fDelphiPath) + 'bin\paclient.exe'
@@ -335,7 +343,13 @@ begin
   for tmpChannel in fDeployChannels do
   begin
     if (not tmpChannel.CleanChannel) and (not fIgnoreErrors) then
-      raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+      if fLogExceptions then
+      begin
+        Writeln('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+        Halt(1);
+      end
+      else
+        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
   end;
   TFile.Delete(TempFile);
 
@@ -352,7 +366,13 @@ begin
     begin
       if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
               fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
-        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+        if fLogExceptions then
+        begin
+          Writeln('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
     end;
   end;
 
@@ -373,8 +393,7 @@ var
   Node  : IXMLDOMNode;
   Nodes : IXMLDOMNodeList;
   I, J, Count : Integer;
-  entitlementPath,
-  tmpStr: string;
+  entitlementPath: string;
 begin
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
@@ -385,14 +404,26 @@ begin
 
     // Load the project file
     if not XmlDoc.load(aProjectPath) then
-      raise Exception.Create('Project file could not be loaded');
+      if fLogExceptions then
+      begin
+        Writeln('Project file could not be loaded');
+        Halt(1);
+      end
+      else
+        raise Exception.Create('Project file could not be loaded');
 
     // Read the default platform if not set with a parameter (OSX32, Win32/64, etc)
     if fPlatform.IsEmpty then
     begin
       Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/Platform/node()');
       if not Assigned(Node) then
-        raise Exception.Create('Default platform not found in the project. Please specify a platform.');
+        if fLogExceptions then
+        begin
+          Writeln('Default platform not found in the project. Please specify a platform.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Default platform not found in the project. Please specify a platform.');
       fPlatform := Node.nodeValue;
     end;
 
@@ -401,7 +432,13 @@ begin
     begin
       Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/Config/node()');
       if not Assigned(Node) then
-        raise Exception.Create('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
+        if fLogExceptions then
+        begin
+          Writeln('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
       fConfig := Node.nodeValue;
     end;
 
@@ -410,7 +447,13 @@ begin
     begin
       Node := XmlDoc.selectSingleNode('//Deployment/ProjectRoot[@Platform="' + fPlatform + '"]');
       if not Assigned(Node) then
-        raise Exception.Create('ProjectRoot not found in the project.');
+        if fLogExceptions then
+        begin
+          Writeln('ProjectRoot not found in the project.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('ProjectRoot not found in the project.');
       fProjectRoot := Node.attributes.getNamedItem('Name').nodeValue;
       fProjectRoot := fProjectRoot.Replace('$(PROJECTNAME)', fProjectName);
     end;
@@ -692,6 +735,7 @@ begin
   newFolderChannel.ChannelName:='Folder Channel';
   newFolderChannel.Verbose:=fVerbose;
   newFolderChannel.ProjectRoot:=fProjectRoot;
+  newFolderChannel.LogExceptions:=fLogExceptions;
   fDeployChannels.Add(newFolderChannel);
 end;
 
@@ -704,6 +748,7 @@ begin
   newPAClientChannel.ChannelName:='PAClient';
   newPAClientChannel.Verbose:=fVerbose;
   newPAClientChannel.ProjectRoot:=fProjectRoot;
+  newPAClientChannel.LogExceptions:=fLogExceptions;
   fDeployChannels.Add(newPAClientChannel);
 end;
 
@@ -748,7 +793,13 @@ begin
   begin
     if tmpChannel is TPAClientChannel then
       if (not tmpChannel.DeployFile(TempFile,'.',5,'')) and (not fIgnoreErrors) then
-        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Command Error.');
+        if fLogExceptions then
+        begin
+          Writeln('Error in '+tmpChannel.ChannelName+'. Command Error.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Command Error.');
   end;
 
   TFile.Delete(TempFile);

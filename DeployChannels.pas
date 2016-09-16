@@ -13,11 +13,14 @@ type
     function GetProjectRoot: string;
     procedure SetChannelName (const newChannelName: string);
     function GetChannelName: string;
+    procedure SetLogExceptions(const newLog: Boolean);
+    function GetLogExceptions: boolean;
 
     property Verbose: boolean read GetVerbose write SetVerbose;
     property FileListName: string read GetFileListName write SetFileListName;
     property ProjectRoot: string read GetProjectRoot write SetProjectRoot;
     property ChannelName: string read GetChannelName write SetChannelName;
+    property LogExceptions: boolean read GetLogExceptions write SetLogExceptions;
   end;
 
   IDeployChannel = interface (IDeployChannelBasic)
@@ -35,6 +38,7 @@ type
     fFileListName,
     fProjectRoot: string;
     fChannelName: string;
+    fLogExceptions: Boolean;
   public
     procedure SetVerbose(const newVerbose: Boolean);
     function GetVerbose: boolean;
@@ -44,6 +48,8 @@ type
     function GetProjectRoot: string;
     procedure SetChannelName (const newChannelName: string);
     function GetChannelName: string;
+    procedure SetLogExceptions(const newLog: Boolean);
+    function GetLogExceptions: boolean;
   end;
 
   TPAClientChannel = class(TDeployBaseChannel, IDeployChannel)
@@ -112,7 +118,13 @@ begin
   Security.bInheritHandle       := true;
   Security.lpSecurityDescriptor := nil;
   if not CreatePipe(PipeRead, PipeWrite, @Security, 0) then
-    RaiseLastOSError;
+    if fLogExceptions then
+    begin
+      Writeln('OS Raised an exception.');
+      Halt(1);
+    end
+    else
+      RaiseLastOSError;
 
   try
     ZeroMemory(@StartInfo, SizeOf(StartInfo));
@@ -207,7 +219,13 @@ begin
         if Reg.ValueExists('Default_'+fPlatfrom) then
           fRemoteProfile := Reg.ReadString('Default_' + fPlatfrom);
         if fRemoteProfile.IsEmpty then
-          raise Exception.Create('Default remote profile not found. Please specify a profile');
+          if fLogExceptions then
+          begin
+            Writeln('Default remote profile not found. Please specify a profile');
+            Halt(1);
+          end
+          else
+            raise Exception.Create('Default remote profile not found. Please specify a profile');
     finally
       Reg.Free;
     end;
@@ -328,6 +346,11 @@ begin
   result:=fFileListName;
 end;
 
+function TDeployBaseChannel.GetLogExceptions: boolean;
+begin
+  result:=fLogExceptions;
+end;
+
 function TDeployBaseChannel.GetProjectRoot: string;
 begin
   result:=fProjectRoot;
@@ -346,6 +369,11 @@ end;
 procedure TDeployBaseChannel.SetFileListName(const newFileList: string);
 begin
   fFileListName:=newFileList;
+end;
+
+procedure TDeployBaseChannel.SetLogExceptions(const newLog: Boolean);
+begin
+  fLogExceptions:=newLog;
 end;
 
 procedure TDeployBaseChannel.SetProjectRoot(const newProjectRoot: string);
