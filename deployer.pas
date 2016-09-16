@@ -78,6 +78,11 @@ type
     fDeployChannels: TList<IDeployChannel>;
     fBinaryFolder : string;
     fLogExceptions: Boolean;
+    fDebugExcludeFiles: TList<string>; //Keeps a list of extensions to be excluded depending on
+                                               //the configuration. Eg. .rsm file is deployed in Debug
+                                               //but not in Release configuration. This allows for use of
+                                               //Debug builds to Release deployments
+    fReleaseExcludeFiles: TList<string>;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
     procedure CreateDeploymentFile(const fullPath: string);
@@ -158,6 +163,9 @@ constructor TDeployer.Create(const aDelphiVersion: String);
 begin
   inherited Create;
   fDeployChannels:=TList<IDeployChannel>.Create;
+  fDebugExcludeFiles:=TList<string>.Create;
+  fReleaseExcludeFiles:=TList<string>.Create;
+  fReleaseExcludeFiles.Add('.rsm');
   fDelphiVersion := aDelphiVersion;
   GetEmbarcaderoPaths;
 end;
@@ -383,6 +391,8 @@ end;
 destructor TDeployer.Destroy;
 begin
   fDeployChannels.Free;
+  fDebugExcludeFiles.Free;
+  fReleaseExcludeFiles.Free;
   inherited;
 end;
 
@@ -394,6 +404,9 @@ var
   Nodes : IXMLDOMNodeList;
   I, J, Count : Integer;
   entitlementPath: string;
+  tmpDeployFile: TDeployFile;
+  currExcludeList: TList<string>;
+  tmpstr: string;
 begin
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
@@ -706,8 +719,6 @@ begin
         fDeployFiles[I].RemoteName := ExtractFileName(fDeployFiles[I].LocalName);
     end;
 
-    //Change the folder to the binaryFolder is supplied in the command line
-
     if fVerbose then
     begin
       Writeln('--------------------');
@@ -722,6 +733,7 @@ begin
     end;
 
 
+    //Change the folder to the binaryFolder is supplied in the command line
     if trim(fBinaryFolder)<>'' then
     begin
       for i := 0 to Length(fDeployFiles)-1 do
@@ -745,6 +757,25 @@ begin
         Writeln('--------------------------------------------------');
       end;
 
+    end;
+
+    Writeln('Checking files against configuration ('+fConfig+')');
+    if fConfig='Debug' then
+      currExcludeList:=fDebugExcludeFiles;
+    if fConfig='Release' then
+      currExcludeList:=fReleaseExcludeFiles;
+    i:=0;
+    for tmpDeployFile in fDeployFiles do
+    begin
+      tmpstr:=ExtractFileExt(tmpDeployFile.LocalName);
+      if currExcludeList.Contains(ExtractFileExt(tmpDeployFile.LocalName)) then
+      begin
+        Writeln('Ignored: '+tmpDeployFile.LocalName);
+        fDeployFiles[i]:=fDeployFiles[High(fDeployFiles)];
+        if i<High(fDeployFiles) then
+          SetLength(fDeployFiles,length(fDeployFiles)-1);
+      end;
+      Inc(i);
     end;
 
   finally
