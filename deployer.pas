@@ -675,7 +675,7 @@ begin
   fProjectName:=project;
   if fPlatform='OSX32' then
     projName:=fProjectName+'.app';
-  newFolderChannel:=TFolderChannel.Create(Trim(regPath), projName);
+  newFolderChannel:=TFolderChannel.Create(Trim(regPath), projName, fProjectName);
   newFolderChannel.ChannelName:='Folder Channel';
   newFolderChannel.Verbose:=fVerbose;
   newFolderChannel.ProjectRoot:=fProjectRoot;

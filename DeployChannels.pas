@@ -67,8 +67,10 @@ type
   private
     fFolder: string;
     fProjectName: string;
+    fBaseProjectName: string;
   public
-    constructor Create (const newFolder: string; const ProjectName: string);
+    constructor Create (const newFolder: string; const ProjectName: string;
+                          const BaseProjectName: string);
     procedure SetupChannel;
     function CleanChannel:boolean;
     function DeployFile(const localName: string; const remoteDir: string;
@@ -227,16 +229,58 @@ begin
 
 end;
 
-constructor TFolderChannel.Create(const newFolder: string; const ProjectName: string);
+constructor TFolderChannel.Create(const newFolder: string; const ProjectName: string;
+                                      const BaseProjectName: string);
 begin
   fFolder:=newFolder;
   fProjectName:=ProjectName;
+  fBaseProjectName:=BaseProjectName;
 end;
 
 function TFolderChannel.DeployFile(const localName, remoteDir: string;
   const operation: Integer; const remoteName: string): boolean;
+var
+  Source,
+  Target: TFileStream;
+  targetDir,
+  targetPath: string;
+  fileAttributes: TFileAttributes;
 begin
   result:=True;
+  Source:= TFileStream.Create(localName, fmOpenRead);
+ try
+   if not DirectoryExists(remoteDir) then
+   begin
+    targetDir:=TPath.Combine(fFolder,remoteDir);
+    TDirectory.CreateDirectory(targetDir);
+    fileAttributes:=TDirectory.GetAttributes(targetDir);
+    Exclude(fileAttributes, TFileAttribute.faReadOnly);
+    TDirectory.SetAttributes(targetDir,fileAttributes);
+   end;
+
+   targetPath:=TPath.Combine(
+                TPath.Combine(fFolder, remoteDir), remoteName);
+   Target := TFileStream.Create(targetPath, fmOpenWrite or fmCreate );
+   try
+     Target.CopyFrom(Source, Source.Size ) ;
+   finally
+     Target.Free;
+   end;
+
+   fileAttributes:=TFile.GetAttributes(targetPath);
+   Exclude(fileAttributes, TFileAttribute.faReadOnly);
+   TFile.SetAttributes(targetPath, fileAttributes);
+
+   if remoteName=fBaseProjectName then
+   begin
+     Include(fileAttributes, TFileAttribute.faArchive);
+     TFile.SetAttributes(targetPath, fileAttributes);
+   end;
+
+ finally
+   Source.Free;
+ end;
+
 end;
 
 procedure TFolderChannel.SetupChannel;
