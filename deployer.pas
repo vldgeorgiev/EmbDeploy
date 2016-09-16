@@ -4,8 +4,8 @@ interface
 
 uses
   Winapi.ActiveX, Winapi.MsXML,
-  System.Zip,
-  System.Sysutils, System.Classes, System.IOUtils, System.Win.Registry, Winapi.Windows,
+  System.Zip, System.IOUtils,
+  System.Sysutils, System.Classes, System.Win.Registry, Winapi.Windows,
   DeployChannels, System.Generics.Collections;
 
 type
@@ -89,7 +89,7 @@ type
     procedure DeployProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
     procedure RegisterPACLient;
-    procedure RegisterFolder(const regPath: string);
+    procedure RegisterFolder(const regPath: string; const project: string);
 
     property Config       : String  read fConfig        write fConfig;
     property IgnoreErrors : Boolean read fIgnoreErrors  write fIgnoreErrors;
@@ -333,7 +333,7 @@ begin
   for tmpChannel in fDeployChannels do
   begin
     if (not tmpChannel.CleanChannel) and (not fIgnoreErrors) then
-      raise Exception.Create('Error. Deployment stopped.');
+      raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
   end;
   TFile.Delete(TempFile);
 
@@ -350,7 +350,7 @@ begin
     begin
       if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
               fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
-        raise Exception.Create('Paclient error. Deployment stopped.');
+        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
     end;
   end;
 
@@ -667,11 +667,16 @@ begin
   end;
 end;
 
-procedure TDeployer.RegisterFolder(const regPath: string);
+procedure TDeployer.RegisterFolder(const regPath: string; const project: string);
 var
   newFolderChannel: IDeployChannel;
+  projName: string;
 begin
-  newFolderChannel:=TFolderChannel.Create(Trim(regPath));
+  fProjectName:=project;
+  if fPlatform='OSX32' then
+    projName:=fProjectName+'.app';
+  newFolderChannel:=TFolderChannel.Create(Trim(regPath), projName);
+  newFolderChannel.ChannelName:='Folder Channel';
   newFolderChannel.Verbose:=fVerbose;
   newFolderChannel.ProjectRoot:=fProjectRoot;
   fDeployChannels.Add(newFolderChannel);
@@ -683,6 +688,7 @@ var
 begin
   newPAClientChannel:=TPAClientChannel.Create(fRemoteProfile, fPaclientPath,
                                                 fDelphiVersion, fPlatform);
+  newPAClientChannel.ChannelName:='PAClient';
   newPAClientChannel.Verbose:=fVerbose;
   newPAClientChannel.ProjectRoot:=fProjectRoot;
   fDeployChannels.Add(newPAClientChannel);

@@ -11,10 +11,13 @@ type
     function GetFileListName: string;
     procedure SetProjectRoot (const newProjectRoot: string);
     function GetProjectRoot: string;
+    procedure SetChannelName (const newChannelName: string);
+    function GetChannelName: string;
 
     property Verbose: boolean read GetVerbose write SetVerbose;
     property FileListName: string read GetFileListName write SetFileListName;
     property ProjectRoot: string read GetProjectRoot write SetProjectRoot;
+    property ChannelName: string read GetChannelName write SetChannelName;
   end;
 
   IDeployChannel = interface (IDeployChannelBasic)
@@ -31,6 +34,7 @@ type
     fVerbose: Boolean;
     fFileListName,
     fProjectRoot: string;
+    fChannelName: string;
   public
     procedure SetVerbose(const newVerbose: Boolean);
     function GetVerbose: boolean;
@@ -38,6 +42,8 @@ type
     function GetFileListName: string;
     procedure SetProjectRoot (const newProjectRoot: string);
     function GetProjectRoot: string;
+    procedure SetChannelName (const newChannelName: string);
+    function GetChannelName: string;
   end;
 
   TPAClientChannel = class(TDeployBaseChannel, IDeployChannel)
@@ -47,7 +53,6 @@ type
     fDelphiVersion,
     fPlatfrom: string;
     function CallPAClient(aCommand: string): Boolean;
-    procedure DeployProjectToChannel;
   public
     constructor Create (const newRemoteProfile: string; const newPAClientPAth: string;
                         const newDelphiVersion: string; const newPlatform: string);
@@ -61,8 +66,9 @@ type
   TFolderChannel = class(TDeployBaseChannel, IDeployChannel)
   private
     fFolder: string;
+    fProjectName: string;
   public
-    constructor Create (const newFolder: string);
+    constructor Create (const newFolder: string; const ProjectName: string);
     procedure SetupChannel;
     function CleanChannel:boolean;
     function DeployFile(const localName: string; const remoteDir: string;
@@ -73,7 +79,7 @@ type
 implementation
 
 uses
-	System.SysUtils, System.Win.Registry, Winapi.Windows, System.Classes;
+	System.SysUtils, System.Win.Registry, Winapi.Windows, System.Classes, System.IOUtils;
 
 const
   // Paclient commands and the parameters to be substituted
@@ -180,10 +186,6 @@ begin
                               operation, remoteName]));
 end;
 
-procedure TPAClientChannel.DeployProjectToChannel;
-begin
-
-end;
 
 // Check if there is a remote profile and try to find one. Must be after the project is parsed
 procedure TPAClientChannel.SetupChannel;
@@ -215,8 +217,9 @@ end;
 { TFolderChannel }
 
 function TFolderChannel.CleanChannel:boolean;
+
 begin
-  result:=true;
+  Result:=true;
 end;
 
 procedure TFolderChannel.CloseChannel;
@@ -224,11 +227,11 @@ begin
 
 end;
 
-constructor TFolderChannel.Create(const newFolder: string);
+constructor TFolderChannel.Create(const newFolder: string; const ProjectName: string);
 begin
   fFolder:=newFolder;
+  fProjectName:=ProjectName;
 end;
-
 
 function TFolderChannel.DeployFile(const localName, remoteDir: string;
   const operation: Integer; const remoteName: string): boolean;
@@ -237,11 +240,44 @@ begin
 end;
 
 procedure TFolderChannel.SetupChannel;
-begin
+  procedure DeleteDirectory(const Name: string);
+  var
+    F: TSearchRec;
+    str: string;
+  begin
+    if FindFirst(Name + '\*', faAnyFile, F) = 0 then begin
+      try
+        repeat
+          if (F.Attr and faDirectory <> 0) then
+          begin
+            if (F.Name <> '.') and (F.Name <> '..') then
+            begin
+              DeleteDirectory(Name + '\' + F.Name);
+            end;
+          end
+          else
+          begin
+            str:=Name + '\' + F.Name;
+            DeleteFile(PWideChar(str));
+          end;
+        until FindNext(F) <> 0;
+      finally
+        FindClose(F.FindHandle);
+      end;
+      RemoveDir(Name);
+    end;
+  end;
 
+begin
+  DeleteDirectory(TPath.Combine(fFolder, fProjectName));
 end;
 
 { TDeployBaseChannel }
+
+function TDeployBaseChannel.GetChannelName: string;
+begin
+  result:=fChannelName;
+end;
 
 function TDeployBaseChannel.GetFileListName: string;
 begin
@@ -256,6 +292,11 @@ end;
 function TDeployBaseChannel.GetVerbose: boolean;
 begin
   result:=fVerbose;
+end;
+
+procedure TDeployBaseChannel.SetChannelName(const newChannelName: string);
+begin
+  fChannelName:=newChannelName;
 end;
 
 procedure TDeployBaseChannel.SetFileListName(const newFileList: string);
