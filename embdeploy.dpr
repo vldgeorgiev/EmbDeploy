@@ -12,15 +12,27 @@ program embdeploy;
 {$R *.res}
 
 uses
-  System.SysUtils,
-  Deployer in 'Deployer.pas';
+  EMemLeaks,
+
+  EResLeaks,
+  EDialogConsole,
+  EDebugExports,
+  EDebugJCL,
+  EFixSafeCallException,
+  EMapWin32,
+  EAppConsole,
+  ExceptionLog7,  System.SysUtils,
+  System.IOUtils,
+  Deployer in 'Deployer.pas',
+  DeployChannels in 'DeployChannels.pas';
 
 const
-  VERSION = '1.3';
+  VERSION = '1.4';
 
 var
   Deployer: TDeployer;
   Project, Param, DelphiVer: String;
+  logExceptions: boolean;
 
 // Display the parameters usage information
 procedure ShowUsage;
@@ -50,14 +62,27 @@ begin
   ShowParam('-registerPAClient','Uses the PAClient to deploy the project');
   ShowParam('-registerFolder "folder"', 'OSX only: Creates the APP folder structure on Windows.'+
                                       ' Useful for building OSX without the need to use the paclient on OSX');
+  ShowParam('-binaryFolder "folder"','The folder for the binary files. If not provided, the default location is assumed');
+  ShowParam('-logExceptions','Logs any exceptions and quits instead of raising them');
 end;
 
 // Check if the valid combination of parameters is passed
 function ValidateParams: Boolean;
+var
+  tmpMessage: string;
 begin
   Project := ParamStr(ParamCount);
   if not FileExists(Project) then
-    raise Exception.Create('Project "' + Project +'" not found');
+  begin
+    tmpMessage:='Project "' + Project +'" not found';
+    if logExceptions then
+    begin
+      Writeln(tmpMessage);
+      Halt(1);
+    end
+    else
+      raise Exception.Create(tmpMessage);
+  end;
 
   Result := FindCmdLineSwitch('deploy') or FindCmdLineSwitch('cmd') or FindCmdLineSwitch('bundle');
 end;
@@ -70,16 +95,21 @@ begin
     Writeln('Automated deployer for Embarcadero RAD Studio projects - Version ' + VERSION);
     Writeln('Written by Vladimir Georgiev, 2013');
 
-    if FindCmdLineSwitch('?') or not ValidateParams then
+    if FindCmdLineSwitch('?') or (ParamCount=0) then
     begin
       ShowUsage;
       Exit;
     end;
 
+    logExceptions:=FindCmdLineSwitch('logExceptions');
+    ValidateParams;
+
     if FindCmdLineSwitch('delphiver', Param) then
       DelphiVer := Param;
     Deployer := TDeployer.Create(DelphiVer);
     try
+      Deployer.LogExceptions:=logExceptions;
+
       if FindCmdLineSwitch('platform', Param) then
         Deployer.Platform := Param;
       if FindCmdLineSwitch('profile', Param) then
@@ -88,9 +118,14 @@ begin
         Deployer.Config := Param;
       if FindCmdLineSwitch('proot', Param) then
         Deployer.ProjectRoot := Param;
+
       Deployer.IgnoreErrors := FindCmdLineSwitch('ignore');
 
       Deployer.Verbose:=FindCmdLineSwitch('verbose');
+
+      Deployer.BinaryFolder:='';
+      if FindCmdLineSwitch('binaryFolder', Param) then
+        Deployer.BinaryFolder:=Param;
 
       if FindCmdLineSwitch('registerPAClient') then
         Deployer.RegisterPACLient;
