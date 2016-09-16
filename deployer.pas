@@ -76,6 +76,7 @@ type
     fVerInfoKeys: string;
     fVerbose: Boolean;
     fDeployChannels: TList<IDeployChannel>;
+    fBinaryFolder: string;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
     procedure CreateDeploymentFile(const fullPath: string);
@@ -96,7 +97,8 @@ type
     property Platform     : String  read fPlatform      write fPlatform;
     property ProjectRoot  : String  read fProjectRoot   write fProjectRoot;
     property RemoteProfile: String  read fRemoteProfile write fRemoteProfile;
-    property Verbose: boolean read fVerbose write fVerbose;
+    property Verbose      : boolean read fVerbose       write fVerbose;
+    property BinaryFolder : string  read fBinaryFolder  write fBinaryFolder;
   end;
 
 
@@ -371,7 +373,8 @@ var
   Node  : IXMLDOMNode;
   Nodes : IXMLDOMNodeList;
   I, J, Count : Integer;
-  entitlementPath: string;
+  entitlementPath,
+  tmpStr: string;
 begin
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
@@ -658,6 +661,16 @@ begin
       fDeployFiles[I].RemoteDir := IncludeTrailingPathDelimiter(IncludeTrailingPathDelimiter(fProjectRoot) + fDeployFiles[I].RemoteDir);
       if fDeployFiles[I].RemoteName.IsEmpty then
         fDeployFiles[I].RemoteName := ExtractFileName(fDeployFiles[I].LocalName);
+    end;
+
+    //Change the folder to the binaryFolder is supplied in the command line
+    if trim(fBinaryFolder)<>'' then
+    begin
+      for i := 0 to Length(fDeployFiles)-1 do
+        if fDeployFiles[i].ClassName<>'DependencyModule' then
+          fDeployFiles[i].LocalName:=TPath.Combine(
+                            IncludeTrailingPathDelimiter(fBinaryFolder),
+                            ExtractFileName(fDeployFiles[i].LocalName));
     end;
 
   finally
