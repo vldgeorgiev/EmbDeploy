@@ -707,13 +707,44 @@ begin
     end;
 
     //Change the folder to the binaryFolder is supplied in the command line
+
+    if fVerbose then
+    begin
+      Writeln('--------------------');
+      Writeln('Files to be deployed');
+      Writeln('--------------------');
+      Writeln('Class Name - Local Name - Remote Name - Remote Dir');
+      Writeln('--------------------------------------------------');
+      for i := 0 to Length(fDeployFiles)-1 do
+        Writeln(Format('%10s - %10s - %10s - %10s',
+            [fDeployFiles[i].ClassName, fDeployFiles[i].LocalName,
+            fDeployFiles[i].RemoteName, fdeployFiles[i].RemoteDir]));
+    end;
+
+
     if trim(fBinaryFolder)<>'' then
     begin
       for i := 0 to Length(fDeployFiles)-1 do
-        if fDeployFiles[i].ClassName<>'DependencyModule' then
+        if (Trim(fDeployFiles[i].ClassName)<>'DependencyModule')
+          and (Trim(fDeployFiles[i].ClassName)<>'ProjectOSXResource') then
           fDeployFiles[i].LocalName:=TPath.Combine(
                             IncludeTrailingPathDelimiter(fBinaryFolder),
                             ExtractFileName(fDeployFiles[i].LocalName));
+
+      if fVerbose then
+      begin
+        Writeln('--------------------');
+        Writeln('Files to be deployed (after use of BinaryFolder:'+fBinaryFolder+')');
+        Writeln('--------------------');
+        Writeln('Class Name - Local Name - Remote Name - Remote Dir');
+        Writeln('--------------------------------------------------');
+        for i := 0 to Length(fDeployFiles)-1 do
+          Writeln(Format('%10s - %10s - %10s - %10s',
+              [fDeployFiles[i].ClassName, fDeployFiles[i].LocalName,
+              fDeployFiles[i].RemoteName, fdeployFiles[i].RemoteDir]));
+        Writeln('--------------------------------------------------');
+      end;
+
     end;
 
   finally
