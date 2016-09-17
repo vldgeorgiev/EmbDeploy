@@ -11,17 +11,7 @@ program embdeploy;
 
 {$R *.res}
 
-uses
-  EMemLeaks,
-
-  EResLeaks,
-  EDialogConsole,
-  EDebugExports,
-  EDebugJCL,
-  EFixSafeCallException,
-  EMapWin32,
-  EAppConsole,
-  ExceptionLog7,  System.SysUtils,
+uses  System.SysUtils,
   System.IOUtils,
   Deployer in 'Deployer.pas',
   DeployChannels in 'DeployChannels.pas';

@@ -5,7 +5,7 @@
         <FrameworkType>None</FrameworkType>
         <MainSource>embdeploy.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
         <AppType>Console</AppType>
@@ -781,19 +781,13 @@ $(PostBuildEvent)]]></PostBuildEvent>
 <!-- EurekaLog First Line
 [Exception Log]
 EurekaLog Version=7007
-Activate=1
+Activate=0
 atConsole=1
-atFixSafeCallException=1
-atWin32=1
 DeleteMapAfterCompile=0
 Dialog Class="TConsoleWriterDialog"
 dpJCL=1
 Encrypt Password=""
 idConsole=1
-InjectCode=1
-InjectInfo=1
-InjectOptions=1
-loEnableMMDebugMode=1
 ProjectID="{862B4B0C-0BBF-4F28-A0DD-D025B6BDB781}"
 sndScreenshot=0
 EurekaLog Last Line -->
