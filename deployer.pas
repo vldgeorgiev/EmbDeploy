@@ -4,8 +4,9 @@ interface
 
 uses
   Winapi.ActiveX, Winapi.MsXML,
-  System.Zip,
-  System.Sysutils, System.Classes, System.IOUtils, System.Win.Registry, Winapi.Windows;
+  System.Zip, System.IOUtils,
+  System.Sysutils, System.Classes, System.Win.Registry, Winapi.Windows,
+  DeployChannels, System.Generics.Collections;
 
 type
   TDeployClass = record
@@ -26,6 +27,38 @@ type
     Configuration: String;    // Release/Debug/Base/Others...
   end;
 
+  TEntitlementsRecord= record
+    ReadOnlyMusic: Boolean; //<EL_ReadOnlyMusic>
+    ///// The IDE doesn't create key for this entry
+    ///// <EL_ReadWriteMusic>
+    ReadWriteMusic: Boolean;
+    ////
+
+    ReadOnlyPictures: Boolean; //<EL_ReadOnlyPictures>
+    ////// There is a bug in the creation of the file by the IDE
+    ReadWritePictures: Boolean; //<EL_ReadWritePictures>
+    /////  The key com.apple.security.assets.pictures.read-only is
+    /////  generated twice.
+    ///// The com.apple.security.assets.pictures.read-write is missing
+
+    IncomingNetwork: Boolean; //<EL_IncomingNetwork>
+    OutgoingNetwork: Boolean; //<EL_OutgoingNetwork>
+    Location: Boolean; //<EL_Location>true
+    USBDevice: Boolean; //<EL_USBDevices>
+    ReadWriteCalendars: Boolean; //<EL_ReadWriteCalendars>
+    ReadWriteFileDialog: Boolean; //<EL_ReadWriteFileDialog>
+    ReadOnlyFileDialog: Boolean; //<EL_ReadOnlyFileDialog>
+    ReadWriteDownloads: Boolean; //<EL_ReadWriteDownloads>
+    ReadWriteMovies: Boolean; //<EL_ReadWriteMovies>
+    ReadOnlyMovies: Boolean; //<EL_ReadOnlyMovies>
+    RecordingMicrophone: Boolean; //<EL_RecordingMicrophone>
+
+    Printing: Boolean; //<EL_Printing>
+    CaptureCamera: Boolean; //<EL_CaptureCamera>
+    ReadWriteAddressBook: Boolean; //<EL_ReadWriteAddressBook>
+    ChildProcessInheritance: Boolean; //<EL_ChildProcessInheritance>
+  end;
+
   TDeployer = class
   private
     fDelphiPath   : String;
@@ -39,116 +72,47 @@ type
     fDeployFiles  : array of TDeployFile;
     fIgnoreErrors : Boolean;
     fPaclientPath : String;
-    function  CallPaclient(const aCommand: String): Boolean;
-    procedure CheckRemoteProfile;
+    fEntitlements : TEntitlementsRecord;
+    fVerInfoKeys  : string;
+    fVerbose      : Boolean;
+    fDeployChannels: TList<IDeployChannel>;
+    fBinaryFolder : string;
+    fLogExceptions: Boolean;
+    fDebugExcludeFiles: TList<string>; //Keeps a list of extensions to be excluded depending on
+                                               //the configuration. Eg. .rsm file is deployed in Debug
+                                               //but not in Release configuration. This allows for use of
+                                               //Debug builds to Release deployments
+    fReleaseExcludeFiles: TList<string>;
     procedure GetEmbarcaderoPaths;
     procedure ParseProject(const aProjectPath: String);
+    procedure CreateDeploymentFile(const fullPath: string);
+    procedure CreateEntitlementsFile(const fullPath: string);
+    procedure CreateInfoPlistFile(const fullPath: string);
+    procedure SetupChannels;
   public
     constructor Create(const aDelphiVersion: String);
+    destructor Destroy; override;
     procedure BundleProject(const aProjectPath, aZIPName: String);
     procedure DeployProject(const aProjectPath: String);
     procedure ExecuteCommand(const aProjectPath, aCommand: String);
+    procedure RegisterPACLient;
+    procedure RegisterFolder(const regPath: string; const project: string);
+
     property Config       : String  read fConfig        write fConfig;
     property IgnoreErrors : Boolean read fIgnoreErrors  write fIgnoreErrors;
     property Platform     : String  read fPlatform      write fPlatform;
     property ProjectRoot  : String  read fProjectRoot   write fProjectRoot;
     property RemoteProfile: String  read fRemoteProfile write fRemoteProfile;
+    property Verbose      : boolean read fVerbose       write fVerbose;
+    property BinaryFolder : string  read fBinaryFolder  write fBinaryFolder;
+    property LogExceptions: Boolean read fLogExceptions write fLogExceptions;
   end;
+
 
 implementation
 
-const
-  // Paclient commands and the parameters to be substituted
-  PACLIENT_CLEAN = '--Clean="%s,%s"';     //0 - project root name, 1 - path to a temp file with containing a list of files
-  PACLIENT_PUT   = '--put="%s,%s,%d,%s"'; //0 - local name, 1 - remote path, 2 - operation, 3 - remote name
-
-
-// Execute the PaClient.exe app and pass it the command and profile
-// Filter some of the paclient output by capturing the out and err pipes
-function TDeployer.CallPaclient(const aCommand: String): Boolean;
-var
-  Security           : TSecurityAttributes;
-  PipeRead, PipeWrite: THandle;
-  BytesInPipe        : Cardinal;
-  Buffer             : array[0..2000] of AnsiChar;
-  Output             : TStringList;
-  StartInfo          : TStartupInfo;
-  ProcInfo           : TProcessInformation;
-  I                  : Integer;
-  ExCode             : Cardinal;
-begin
-  Result := false;
-
-  // Create a pipe to capture the output
-  Security.nLength              := SizeOf(TSecurityAttributes);
-  Security.bInheritHandle       := true;
-  Security.lpSecurityDescriptor := nil;
-  if not CreatePipe(PipeRead, PipeWrite, @Security, 0) then
-    RaiseLastOSError;
-
-  try
-    ZeroMemory(@StartInfo, SizeOf(StartInfo));
-    ZeroMemory(@ProcInfo, SizeOf(ProcInfo));
-    StartInfo.cb          := SizeOf(StartInfo);
-    StartInfo.hStdOutput  := PipeWrite;
-    StartInfo.hStdError   := PipeWrite;
-    StartInfo.dwFlags     := STARTF_USESTDHANDLES;  // use output redirect pipe
-
-    if CreateProcess(nil, PChar(fPaclientPath + ' ' + aCommand + ' ' + fRemoteProfile), nil, nil, true,
-                          CREATE_NO_WINDOW, nil, nil, StartInfo, ProcInfo) then
-      try
-        WaitForSingleObject(ProcInfo.hProcess, Infinite);
-        // The process has finished, so close the write pipe and read the output
-        CloseHandle(PipeWrite);
-        ZeroMemory(@Buffer, Length(Buffer));
-        ReadFile(PipeRead, Buffer[0], Length(Buffer), BytesInPipe, nil);
-        // Parse the output, delete the first 4 lines, that are not very useful, and display the rest indented
-        Output := TStringList.Create;
-        try
-          Output.Text := String(Buffer);
-          Output.Delete(0); Output.Delete(0); Output.Delete(0); Output.Delete(0);
-          for I := 0 to Output.Count - 1 do
-            WriteLn('  ' + Output[I]);
-        finally
-          Output.Free;
-        end;
-
-        // Check the exit code of paclient.exe / 0 is success
-        Result := GetExitCodeProcess(ProcInfo.hProcess, ExCode) and (ExCode = 0);
-      finally
-        CloseHandle(ProcInfo.hProcess);
-        CloseHandle(ProcInfo.hThread);
-      end;
-  finally
-    CloseHandle(PipeRead);
-    {$IFNDEF  DEBUG}  // The PipeWrite handle is closed twice, which is acceptable in Release, but raises exceptions when running with the debugger
-    CloseHandle(PipeWrite);
-    {$ENDIF}
-  end;
-end;
-
-// Check if there is a remote profile assigned, or try to find the default one for the platform
-procedure TDeployer.CheckRemoteProfile;
-var
-  Reg: TRegistry;
-begin
-  if fRemoteProfile.IsEmpty then
-  begin
-    Reg := TRegistry.Create;
-    try
-      Reg.RootKey := HKEY_CURRENT_USER;
-      if Reg.OpenKey('Software\Embarcadero\BDS\' + fDelphiVersion + '\RemoteProfiles', false) then
-        if Reg.ValueExists('Default_' + fPlatform) then
-          fRemoteProfile := Reg.ReadString('Default_' + fPlatform);
-
-      if fRemoteProfile.IsEmpty then
-        raise Exception.Create('Default remote profile not found. Please specify a profile.');
-      Writeln('Using default profile: ' + fRemoteProfile);
-    finally
-      Reg.Free;
-    end;
-  end;
-end;
+uses
+	System.StrUtils;
 
 // Try to find the last version of Delphi installed to get the Redist folder and Paclient path
 procedure TDeployer.GetEmbarcaderoPaths;
@@ -181,6 +145,12 @@ begin
       if Reg.ValueExists('RootDir') then
         fDelphiPath := Reg.ReadString('RootDir');
     if fDelphiPath.IsEmpty then
+    if fLogExceptions then
+    begin
+      Writeln('The Delphi install path could not be found.');
+      Halt(1);
+    end
+    else
       raise Exception.Create('The Delphi install path could not be found.');
 
     fPaclientPath := IncludeTrailingPathDelimiter(fDelphiPath) + 'bin\paclient.exe'
@@ -192,8 +162,134 @@ end;
 constructor TDeployer.Create(const aDelphiVersion: String);
 begin
   inherited Create;
+  fDeployChannels:=TList<IDeployChannel>.Create;
+  fDebugExcludeFiles:=TList<string>.Create;
+  fReleaseExcludeFiles:=TList<string>.Create;
+  fReleaseExcludeFiles.Add('.rsm');
   fDelphiVersion := aDelphiVersion;
   GetEmbarcaderoPaths;
+end;
+
+// Creates files required for the deployment package
+// Currently it creates the .entitlements and .info.plist files for OSX32
+procedure TDeployer.CreateDeploymentFile(const fullPath: string);
+var
+  ext: string;
+begin
+  ext:=ExtractFileExt(fullPath);
+  if (ext='.entitlements') and (fPlatform='OSX32') then
+    CreateEntitlementsFile(fullPath);
+  if (ext='.plist') and (fPlatform='OSX32') then
+    CreateInfoPlistFile(fullPath);
+end;
+
+procedure TDeployer.CreateEntitlementsFile(const fullPath: string);
+
+  function BooleanToString(const value: boolean): string;
+  begin
+    if value then
+      result:='true'
+    else
+      result:='false';
+  end;
+
+var
+  xmlFile: TStringList;
+begin
+  xmlFile:=TStringList.Create;
+  try
+    xmlFile.Add('<?xml version="1.0" encoding="UTF-8"?>');
+    xmlFile.Add('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">');
+    xmlFile.Add('<plist version="1.0">');
+    xmlFile.Add('<dict>');
+
+    xmlFile.Add('   <key>com.apple.security.assets.music.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyMusic)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.music.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteMusic)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.pictures.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyPictures)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.pictures.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWritePictures)+'/>');
+    xmlFile.Add('   <key>com.apple.security.network.client</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.IncomingNetwork)+'/>');
+    xmlFile.Add('   <key>com.apple.security.network.server</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.OutgoingNetwork)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.location</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.Location)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.usb</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.USBDevice)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.calendars</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteCalendars)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.user-selected.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteFileDialog)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.user-selected.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyFileDialog)+'/>');
+    xmlFile.Add('   <key>com.apple.security.files.downloads.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteDownloads)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.movies.read-write</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteMovies)+'/>');
+    xmlFile.Add('   <key>com.apple.security.assets.movies.read-only</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadOnlyMovies)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.microphone</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.RecordingMicrophone)+'/>');
+    xmlFile.Add('   <key>com.apple.security.print</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.Printing)+'/>');
+    xmlFile.Add('   <key>com.apple.security.device.camera</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.CaptureCamera)+'/>');
+    xmlFile.Add('   <key>com.apple.security.personal-information.addressbook</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ReadWriteAddressBook)+'/>');
+    xmlFile.Add('   <key>com.apple.security.inherit</key>');
+    xmlFile.Add('   <'+BooleanToString(fEntitlements.ChildProcessInheritance)+'/>');
+
+    XmlFile.Add('</dict>');
+    xmlFile.Add('</plist>');
+
+    xmlFile.SaveToFile(fullPath);
+  finally
+    xmlFile.Free;
+  end;
+end;
+
+procedure TDeployer.CreateInfoPlistFile(const fullPath: string);
+var
+  xmlFile,
+  verKeys: TStringList;
+  i: Integer;
+begin
+  xmlFile:=TStringList.Create;
+  try
+    xmlFile.Add('<?xml version="1.0" encoding="UTF-8"?>');
+    xmlFile.Add('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">');
+    xmlFile.Add('<plist version="1.0">');
+    xmlFile.Add('<dict>');
+
+    verKeys:=TStringList.Create;
+    try
+      verKeys.Delimiter:=';';
+      verKeys.StrictDelimiter:=true;
+      verKeys.DelimitedText:=fVerInfoKeys;
+
+      for i := 0 to verKeys.Count-1 do
+      begin
+        xmlFile.Add('   <key>'+verKeys[i].Split(['='])[0]+'</key>');
+        xmlFile.Add('   <string>'+verKeys[i].Split(['='])[1]+'</string>');
+      end;
+
+      xmlFile.Add('   <key>CFBundleIconFile</key>');
+      xmlFile.Add('   <string>'+fProjectName+'.icns</string>');
+
+    finally
+      verKeys.Free;
+    end;
+
+    XmlFile.Add('</dict>');
+    xmlFile.Add('</plist>');
+
+    xmlFile.SaveToFile(fullPath);
+  finally
+    xmlFile.Free;
+  end;
 end;
 
 // Produce a ZIP archive of the files to be deployed (useful to produce archives of the OSX .APP bundles on Win)
@@ -228,11 +324,11 @@ procedure TDeployer.DeployProject(const aProjectPath: String);
 var
   S, TempFile: String;
   I: Integer;
+  tmpChannel: IDeployChannel;
 begin
   ParseProject(aProjectPath);
 
-  // Check if there is a remote profile and try to find one. Must be after the project is parsed
-  CheckRemoteProfile;
+  SetupChannels;
 
   WriteLn(Format('Deploying %d files from project %s, config %s', [Length(fDeployFiles), aProjectPath, fConfig]));
 
@@ -241,20 +337,63 @@ begin
   for I := 0 to Length(fDeployFiles) - 1 do
     S := S + fDeployFiles[I].RemoteDir + fDeployFiles[I].RemoteName + sLineBreak;
   TFile.WriteAllText(TempFile, S);
+
+  if fVerbose then
+    Writeln('TempFile: '+TempFile);
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.FileListName:=TempFile;
+
+  //Clean up deploy channels
   // Execute the clean command and delete the temp file
   Writeln('Cleaning remote project folder');
-  if not CallPaclient(Format(PACLIENT_CLEAN, [fProjectRoot, TempFile])) and not fIgnoreErrors then
-    raise Exception.Create('Paclient error. Deployment stopped.');
+
+  for tmpChannel in fDeployChannels do
+  begin
+    if (not tmpChannel.CleanChannel) and (not fIgnoreErrors) then
+      if fLogExceptions then
+      begin
+        Writeln('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+        Halt(1);
+      end
+      else
+        raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+  end;
   TFile.Delete(TempFile);
+
 
   // Deploy the files
   for I := 0 to Length(fDeployFiles) - 1 do
   begin
     Writeln('Deploying file: ' + fDeployFiles[I].LocalName);
-    if not CallPaclient(Format(PACLIENT_PUT, [fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
-                                              fDeployFiles[I].Operation, fDeployFiles[I].RemoteName])) and not fIgnoreErrors then
-      raise Exception.Create('Paclient error. Deployment stopped.');
+
+    if not TFile.Exists(fDeployFiles[I].LocalName) then
+      CreateDeploymentFile(fDeployFiles[I].LocalName);
+
+    for tmpChannel in fDeployChannels do
+    begin
+      if (not tmpChannel.DeployFile(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir,
+              fDeployFiles[I].Operation, fDeployFiles[I].RemoteName)) and (not fIgnoreErrors) then
+        if fLogExceptions then
+        begin
+          Writeln('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Deployment stopped.');
+    end;
   end;
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.CloseChannel;
+end;
+
+destructor TDeployer.Destroy;
+begin
+  fDeployChannels.Free;
+  fDebugExcludeFiles.Free;
+  fReleaseExcludeFiles.Free;
+  inherited;
 end;
 
 // Parse the project file to find the list of files to be deployed
@@ -264,6 +403,10 @@ var
   Node  : IXMLDOMNode;
   Nodes : IXMLDOMNodeList;
   I, J, Count : Integer;
+  entitlementPath: string;
+  tmpDeployFile: TDeployFile;
+  currExcludeList: TList<string>;
+  tmpstr: string;
 begin
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
@@ -274,14 +417,26 @@ begin
 
     // Load the project file
     if not XmlDoc.load(aProjectPath) then
-      raise Exception.Create('Project file could not be loaded');
+      if fLogExceptions then
+      begin
+        Writeln('Project file could not be loaded');
+        Halt(1);
+      end
+      else
+        raise Exception.Create('Project file could not be loaded');
 
     // Read the default platform if not set with a parameter (OSX32, Win32/64, etc)
     if fPlatform.IsEmpty then
     begin
       Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/Platform/node()');
       if not Assigned(Node) then
-        raise Exception.Create('Default platform not found in the project. Please specify a platform.');
+        if fLogExceptions then
+        begin
+          Writeln('Default platform not found in the project. Please specify a platform.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Default platform not found in the project. Please specify a platform.');
       fPlatform := Node.nodeValue;
     end;
 
@@ -290,7 +445,13 @@ begin
     begin
       Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/Config/node()');
       if not Assigned(Node) then
-        raise Exception.Create('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
+        if fLogExceptions then
+        begin
+          Writeln('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Default build config(Release/Debug/...) not found in the project. Please specify a config.');
       fConfig := Node.nodeValue;
     end;
 
@@ -299,9 +460,141 @@ begin
     begin
       Node := XmlDoc.selectSingleNode('//Deployment/ProjectRoot[@Platform="' + fPlatform + '"]');
       if not Assigned(Node) then
-        raise Exception.Create('ProjectRoot not found in the project.');
+        if fLogExceptions then
+        begin
+          Writeln('ProjectRoot not found in the project.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('ProjectRoot not found in the project.');
       fProjectRoot := Node.attributes.getNamedItem('Name').nodeValue;
       fProjectRoot := fProjectRoot.Replace('$(PROJECTNAME)', fProjectName);
+    end;
+
+    //Get the .entitlements details for OSX
+    if fPlatform='OSX32' then
+    begin
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyMusic/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyMusic := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyMusic:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteMusic/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteMusic := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteMusic:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyPictures/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyPictures := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyPictures:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWritePictures/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWritePictures := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWritePictures:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_IncomingNetwork/node()');
+      if Assigned(Node) then
+        fEntitlements.IncomingNetwork := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.IncomingNetwork:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_OutgoingNetwork/node()');
+      if Assigned(Node) then
+        fEntitlements.OutgoingNetwork := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.OutgoingNetwork:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_Location/node()');
+      if Assigned(Node) then
+        fEntitlements.Location := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.Location:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_USBDevices/node()');
+      if Assigned(Node) then
+        fEntitlements.USBDevice := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.USBDevice:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteCalendars/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteCalendars := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteCalendars:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteFileDialog/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteFileDialog := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteFileDialog:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyFileDialog/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyFileDialog := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyFileDialog:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteDownloads/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteDownloads := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteDownloads:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteMovies/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteMovies := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteMovies:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadOnlyMovies/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadOnlyMovies := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadOnlyMovies:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_RecordingMicrophone/node()');
+      if Assigned(Node) then
+        fEntitlements.RecordingMicrophone := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.RecordingMicrophone:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_Printing/node()');
+      if Assigned(Node) then
+        fEntitlements.Printing := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.Printing:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_CaptureCamera/node()');
+      if Assigned(Node) then
+        fEntitlements.CaptureCamera := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.CaptureCamera:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ReadWriteAddressBook/node()');
+      if Assigned(Node) then
+        fEntitlements.ReadWriteAddressBook := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ReadWriteAddressBook:=False;
+
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/EL_ChildProcessInheritance/node()');
+      if Assigned(Node) then
+        fEntitlements.ChildProcessInheritance := (UpperCase(Node.nodeValue) = 'TRUE')
+      else
+        fEntitlements.ChildProcessInheritance:=False;
+
+    //Get the .plist details for OSX
+      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/VerInfo_Keys/node()');
+      if Assigned(Node) then
+      begin
+        fVerInfoKeys := Node.nodeValue;
+        fVerInfoKeys:=ReplaceStr(fVerInfoKeys,'$(MSBuildProjectName)',fProjectName);
+      end;
     end;
 
     // Get all the Platform subnodes of the DeployClass nodes for the specified platform
@@ -326,7 +619,14 @@ begin
 
       // VG 300715: The XE8 sets the ProjectOSXEntitlements RemoteFolder incorrectly to "../" instead of "Contents"
       // Hardcode a quick fix for it and watch for other such problems
-      if fDeployClasses[Count].Name.Equals('ProjectOSXEntitlements') and fDeployClasses[Count].RemoteDir.Equals('../') then
+      //
+      //Not sure how XE10, 10.1 (Seatlle) deal with this but in D10.1 Berlin the folder is set to "..\" and not to "../"
+      {$IFDEF VER310}
+        entitlementPath:='..\';
+      {$ELSE}
+        entitlementPath:='../';
+      {$ENDIF}
+      if fDeployClasses[Count].Name.Equals('ProjectOSXEntitlements') and fDeployClasses[Count].RemoteDir.Equals(entitlementPath) then
         fDeployClasses[Count].RemoteDir := 'Contents';
 
       Inc(Count);
@@ -419,6 +719,65 @@ begin
         fDeployFiles[I].RemoteName := ExtractFileName(fDeployFiles[I].LocalName);
     end;
 
+    if fVerbose then
+    begin
+      Writeln('--------------------');
+      Writeln('Files to be deployed');
+      Writeln('--------------------');
+      Writeln('Class Name - Local Name - Remote Name - Remote Dir');
+      Writeln('--------------------------------------------------');
+      for i := 0 to Length(fDeployFiles)-1 do
+        Writeln(Format('%10s - %10s - %10s - %10s',
+            [fDeployFiles[i].ClassName, fDeployFiles[i].LocalName,
+            fDeployFiles[i].RemoteName, fdeployFiles[i].RemoteDir]));
+    end;
+
+
+    //Change the folder to the binaryFolder is supplied in the command line
+    if trim(fBinaryFolder)<>'' then
+    begin
+      for i := 0 to Length(fDeployFiles)-1 do
+        if (Trim(fDeployFiles[i].ClassName)<>'DependencyModule')
+          and (Trim(fDeployFiles[i].ClassName)<>'ProjectOSXResource') then
+          fDeployFiles[i].LocalName:=TPath.Combine(
+                            IncludeTrailingPathDelimiter(fBinaryFolder),
+                            ExtractFileName(fDeployFiles[i].LocalName));
+
+      if fVerbose then
+      begin
+        Writeln('--------------------');
+        Writeln('Files to be deployed (after use of BinaryFolder:'+fBinaryFolder+')');
+        Writeln('--------------------');
+        Writeln('Class Name - Local Name - Remote Name - Remote Dir');
+        Writeln('--------------------------------------------------');
+        for i := 0 to Length(fDeployFiles)-1 do
+          Writeln(Format('%10s - %10s - %10s - %10s',
+              [fDeployFiles[i].ClassName, fDeployFiles[i].LocalName,
+              fDeployFiles[i].RemoteName, fdeployFiles[i].RemoteDir]));
+        Writeln('--------------------------------------------------');
+      end;
+
+    end;
+
+    Writeln('Checking files against configuration ('+fConfig+')');
+    if fConfig='Debug' then
+      currExcludeList:=fDebugExcludeFiles;
+    if fConfig='Release' then
+      currExcludeList:=fReleaseExcludeFiles;
+    i:=0;
+    for tmpDeployFile in fDeployFiles do
+    begin
+      tmpstr:=ExtractFileExt(tmpDeployFile.LocalName);
+      if currExcludeList.Contains(ExtractFileExt(tmpDeployFile.LocalName)) then
+      begin
+        Writeln('Ignored: '+tmpDeployFile.LocalName);
+        fDeployFiles[i]:=fDeployFiles[High(fDeployFiles)];
+        if i<High(fDeployFiles) then
+          SetLength(fDeployFiles,length(fDeployFiles)-1);
+      end;
+      Inc(i);
+    end;
+
   finally
     Node   := nil;
     Nodes  := nil;
@@ -426,16 +785,54 @@ begin
   end;
 end;
 
+procedure TDeployer.RegisterFolder(const regPath: string; const project: string);
+var
+  newFolderChannel: IDeployChannel;
+  projName: string;
+begin
+  fProjectName:=project;
+  if fPlatform='OSX32' then
+    projName:=fProjectName+'.app';
+  newFolderChannel:=TFolderChannel.Create(Trim(regPath), projName, fProjectName);
+  newFolderChannel.ChannelName:='Folder Channel';
+  newFolderChannel.Verbose:=fVerbose;
+  newFolderChannel.ProjectRoot:=fProjectRoot;
+  newFolderChannel.LogExceptions:=fLogExceptions;
+  fDeployChannels.Add(newFolderChannel);
+end;
+
+procedure TDeployer.RegisterPACLient;
+var
+  newPAClientChannel: IDeployChannel;
+begin
+  newPAClientChannel:=TPAClientChannel.Create(fRemoteProfile, fPaclientPath,
+                                                fDelphiVersion, fPlatform);
+  newPAClientChannel.ChannelName:='PAClient';
+  newPAClientChannel.Verbose:=fVerbose;
+  newPAClientChannel.ProjectRoot:=fProjectRoot;
+  newPAClientChannel.LogExceptions:=fLogExceptions;
+  fDeployChannels.Add(newPAClientChannel);
+end;
+
+procedure TDeployer.SetupChannels;
+var
+  tmpChannel: IDeployChannel;
+begin
+  for tmpChannel in fDeployChannels do
+    tmpChannel.SetupChannel;
+end;
+
 // Execute a custom command on the remote server
 // This is done by creating a temporary file with the command and executing it in the shell
 procedure TDeployer.ExecuteCommand(const aProjectPath, aCommand: String);
 var
   Text, Cmd, TempFile:  String;
+  tmpChannel: IDeployChannel;
 begin
   ParseProject(aProjectPath);
 
   // Check if there is a remote profile and try to find one. Must be after the project is parsed
-  CheckRemoteProfile;
+  SetupChannels;
 
   // Replace any custom parameters in the command
   Cmd := aCommand.Replace('$PROOT', fProjectRoot, [rfReplaceAll]);
@@ -453,9 +850,25 @@ begin
   // Deploy the file and execute it with the 5 operation
   // The file is deployed to the root deployment folder (the one above the project root folder) and executed there
   Writeln('Executing custom command: ' + aCommand);
-  if not CallPaclient(Format(PACLIENT_PUT, [TempFile, '.', 5, ''])) and not fIgnoreErrors then
-    raise Exception.Create('Command error.');
+
+  for tmpChannel in fDeployChannels do
+  begin
+    if tmpChannel is TPAClientChannel then
+      if (not tmpChannel.DeployFile(TempFile,'.',5,'')) and (not fIgnoreErrors) then
+        if fLogExceptions then
+        begin
+          Writeln('Error in '+tmpChannel.ChannelName+'. Command Error.');
+          Halt(1);
+        end
+        else
+          raise Exception.Create('Error in '+tmpChannel.ChannelName+'. Command Error.');
+  end;
+
   TFile.Delete(TempFile);
+
+  for tmpChannel in fDeployChannels do
+    tmpChannel.CloseChannel;
+
 end;
 
 end.
