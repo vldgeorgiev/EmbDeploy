@@ -6,7 +6,7 @@ uses
   Winapi.ActiveX, Winapi.MsXML,
   System.Zip, System.IOUtils,
   System.Sysutils, System.Classes, System.Win.Registry, Winapi.Windows,
-  DeployChannels, System.Generics.Collections;
+  DeployChannels, System.Generics.Collections, Vcl.Dialogs;
 
 type
   TDeployClass = record
@@ -61,6 +61,7 @@ type
 
   TDeployer = class
   private
+    fProjectParsed:Boolean;
     fDelphiPath   : String;
     fDelphiVersion: String;  // The version number - 9.0, 10.0, 11.0, etc
     fConfig       : String;
@@ -73,7 +74,8 @@ type
     fIgnoreErrors : Boolean;
     fPaclientPath : String;
     fEntitlements : TEntitlementsRecord;
-    fVerInfoKeys  : string;
+    fVerInfoKeys  : TStringList;
+    fCustomVerInfoKeys:String;
     fVerbose      : Boolean;
     fDeployChannels: TList<IDeployChannel>;
     fBinaryFolder : string;
@@ -89,6 +91,7 @@ type
     procedure CreateEntitlementsFile(const fullPath: string);
     procedure CreateInfoPlistFile(const fullPath: string);
     procedure SetupChannels;
+    function CreateVerInfoKeys():TStringList;
   public
     constructor Create(const aDelphiVersion: String);
     destructor Destroy; override;
@@ -106,6 +109,7 @@ type
     property Verbose      : boolean read fVerbose       write fVerbose;
     property BinaryFolder : string  read fBinaryFolder  write fBinaryFolder;
     property LogExceptions: Boolean read fLogExceptions write fLogExceptions;
+    property CustomVerInfoKeys:String read fCustomVerInfoKeys write fCustomVerInfoKeys;
   end;
 
 
@@ -159,12 +163,20 @@ begin
   end;
 end;
 
+function TDeployer.CreateVerInfoKeys():TStringList;
+begin
+  Result := TStringList.Create;
+  Result.Delimiter := ';';
+  Result.StrictDelimiter := true;
+end;
+
 constructor TDeployer.Create(const aDelphiVersion: String);
 begin
   inherited Create;
   fDeployChannels:=TList<IDeployChannel>.Create;
   fDebugExcludeFiles:=TList<string>.Create;
   fReleaseExcludeFiles:=TList<string>.Create;
+  fVerInfoKeys := CreateVerInfoKeys;
   fReleaseExcludeFiles.Add('.rsm');
   fDelphiVersion := aDelphiVersion;
   GetEmbarcaderoPaths;
@@ -253,8 +265,7 @@ end;
 
 procedure TDeployer.CreateInfoPlistFile(const fullPath: string);
 var
-  xmlFile,
-  verKeys: TStringList;
+  xmlFile:TStringList;
   i: Integer;
 begin
   xmlFile:=TStringList.Create;
@@ -264,24 +275,14 @@ begin
     xmlFile.Add('<plist version="1.0">');
     xmlFile.Add('<dict>');
 
-    verKeys:=TStringList.Create;
-    try
-      verKeys.Delimiter:=';';
-      verKeys.StrictDelimiter:=true;
-      verKeys.DelimitedText:=fVerInfoKeys;
-
-      for i := 0 to verKeys.Count-1 do
-      begin
-        xmlFile.Add('   <key>'+verKeys[i].Split(['='])[0]+'</key>');
-        xmlFile.Add('   <string>'+verKeys[i].Split(['='])[1]+'</string>');
-      end;
-
-      xmlFile.Add('   <key>CFBundleIconFile</key>');
-      xmlFile.Add('   <string>'+fProjectName+'.icns</string>');
-
-    finally
-      verKeys.Free;
+    for i := 0 to fVerInfoKeys.Count-1 do
+    begin
+      xmlFile.Add('   <key>'+fVerInfoKeys[i].Split(['='])[0]+'</key>');
+      xmlFile.Add('   <string>'+fVerInfoKeys[i].Split(['='])[1]+'</string>');
     end;
+
+    xmlFile.Add('   <key>CFBundleIconFile</key>');
+    xmlFile.Add('   <string>'+fProjectName+'.icns</string>');
 
     XmlFile.Add('</dict>');
     xmlFile.Add('</plist>');
@@ -297,10 +298,11 @@ procedure TDeployer.BundleProject(const aProjectPath, aZIPName: String);
 var
   Zip: TZipFile;
   I: Integer;
+  addedFiles:TList<String>;
 begin
   ParseProject(aProjectPath);
 
-  WriteLn(Format('Archiving %d files from project %s, config %s', [Length(fDeployFiles), aProjectPath, fConfig]));
+  WriteLn(Format('Archiving %d files from project %s, config %s', [length(fDeployFiles), aProjectPath, fConfig]));
 
   // Create the folders in the zip name, if any
   ForceDirectories(ExtractFilePath(ExpandFileName(aZIPName)));
@@ -312,8 +314,19 @@ begin
     Zip.Open(aZIPName, zmWrite);
 
     // Add each file to the archive with its path. The \ is replaced with / to make the archive work in OSX
-    for I := 0 to Length(fDeployFiles) - 1 do
-      Zip.Add(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir.Replace('\', '/') + fDeployFiles[I].RemoteName.Replace('\', '/'));
+    addedFiles := TList<String>.Create;
+    try
+      for I := 0 to Length(fDeployFiles) - 1 do
+      begin
+        if not addedFiles.Contains(fDeployFiles[I].LocalName) then
+        begin
+          Zip.Add(fDeployFiles[I].LocalName, fDeployFiles[I].RemoteDir.Replace('\', '/') + fDeployFiles[I].RemoteName.Replace('\', '/'));
+          addedFiles.Add(fDeployFiles[I].LocalName);
+        end;
+      end;
+    finally
+      addedFiles.Free;
+    end;
   finally
     Zip.Free;
   end;
@@ -330,7 +343,7 @@ begin
 
   SetupChannels;
 
-  WriteLn(Format('Deploying %d files from project %s, config %s', [Length(fDeployFiles), aProjectPath, fConfig]));
+  WriteLn(Format('Deploying %d files from project %s, config %s', [length(fDeployFiles), aProjectPath, fConfig]));
 
   // Build a temp file list to clean the remote project folder
   TempFile := TPath.GetTempFileName;
@@ -393,6 +406,7 @@ begin
   fDeployChannels.Free;
   fDebugExcludeFiles.Free;
   fReleaseExcludeFiles.Free;
+  fVerInfoKeys.Free;
   inherited;
 end;
 
@@ -407,7 +421,12 @@ var
   tmpDeployFile: TDeployFile;
   currExcludeList: TList<string>;
   tmpstr: string;
+  verInfoKeys:TStringList;
 begin
+  //Avoiding rework and some bugs with bundle option
+  if fProjectParsed then
+    Exit;
+
   CoInitialize(nil);
   XmlDoc := CoDOMDocument.Create;
 
@@ -589,12 +608,46 @@ begin
         fEntitlements.ChildProcessInheritance:=False;
 
     //Get the .plist details for OSX
-      Node := XmlDoc.selectSingleNode('/Project/PropertyGroup/VerInfo_Keys/node()');
-      if Assigned(Node) then
+      if fCustomVerInfoKeys.Trim = '' then
       begin
-        fVerInfoKeys := Node.nodeValue;
-        fVerInfoKeys:=ReplaceStr(fVerInfoKeys,'$(MSBuildProjectName)',fProjectName);
-      end;
+        Node := XmlDoc.selectSingleNode('/Project/PropertyGroup[@Condition="''$(Base_OSX32)''!=''''"]/VerInfo_Keys/node()');
+        if Assigned(Node) then
+        begin
+          tmpstr := Node.nodeValue;
+          tmpstr:=ReplaceStr(tmpstr,'$(MSBuildProjectName)',fProjectName);
+
+          fVerInfoKeys.DelimitedText := tmpstr;
+        end;
+
+        if fConfig = 'Release' then
+          Node := XmlDoc.selectSingleNode('/Project/PropertyGroup[@Condition="''$(Cfg_1_OSX32)''!=''''"]/VerInfo_Keys/node()')
+        else
+          Node := XmlDoc.selectSingleNode('/Project/PropertyGroup[@Condition="''$(Cfg_2_OSX32)''!=''''"]/VerInfo_Keys/node()');
+
+        if Assigned(Node) then
+        begin
+          tmpstr := Node.nodeValue;
+          tmpstr:=ReplaceStr(tmpstr,'$(MSBuildProjectName)',fProjectName);
+
+          if fVerInfoKeys.Count > 0 then
+            begin
+              verInfoKeys := CreateVerInfoKeys();
+              try
+                verInfoKeys.DelimitedText := tmpstr;
+                for I := 0 to verInfoKeys.Count-1 do
+                  begin
+                    fVerInfoKeys.Values[verInfoKeys.Names[i]] := verInfoKeys.ValueFromIndex[i];
+                  end;
+              finally
+                verInfoKeys.Free;
+              end;
+            end
+          else
+            fVerInfoKeys.DelimitedText := tmpstr;
+        end;
+      end
+      else
+        fVerInfoKeys.DelimitedText := fCustomVerInfoKeys;
     end;
 
     // Get all the Platform subnodes of the DeployClass nodes for the specified platform
@@ -715,6 +768,7 @@ begin
 
       // Finalize the Remote names and dirs
       fDeployFiles[I].RemoteDir := IncludeTrailingPathDelimiter(IncludeTrailingPathDelimiter(fProjectRoot) + fDeployFiles[I].RemoteDir);
+
       if fDeployFiles[I].RemoteName.IsEmpty then
         fDeployFiles[I].RemoteName := ExtractFileName(fDeployFiles[I].LocalName);
     end;
@@ -777,6 +831,8 @@ begin
       end;
       Inc(i);
     end;
+
+    fProjectParsed := true;
 
   finally
     Node   := nil;
