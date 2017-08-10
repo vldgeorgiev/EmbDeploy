@@ -54,6 +54,7 @@ begin
                                       ' Useful for building OSX without the need to use the paclient on OSX');
   ShowParam('-binaryFolder "folder"','The folder for the binary files. If not provided, the default location is assumed');
   ShowParam('-logExceptions','Logs any exceptions and quits instead of raising them');
+  ShowParam('-verInfoKeys','Specify a file with custom verInfoKeys. Useful to make a custom Info.plist file');
 end;
 
 // Check if the valid combination of parameters is passed
@@ -121,6 +122,14 @@ begin
         Deployer.RegisterPACLient;
       if FindCmdLineSwitch('registerFolder', Param) then
         Deployer.RegisterFolder(Param, TPath.GetFileNameWithoutExtension(Project));
+
+      if FindCmdLineSwitch('verInfoKeys', Param) then
+      begin
+        if TFile.Exists(Param) then
+          Deployer.CustomVerInfoKeys := Tfile.ReadAllText(Param)
+        else
+          Writeln('Ignoring verInfoKeys param because the file was not found');
+      end;
 
       // Deploy the project
       if FindCmdLineSwitch('deploy') then
